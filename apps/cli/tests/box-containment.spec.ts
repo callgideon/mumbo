@@ -143,7 +143,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   },
   '@deepseek-ai/dsh-message-feedback': NONE,
   '@deepseek-ai/dsh-message-quotes': NONE,
-  '@deepseek-ai/dsh-office-kit': { ...NONE, note: 'document previews the person opens' },
+  '@deepseek-ai/dsh-office-kit': {
+    runs: 'run-as', tools: [], note: 'conversions, the previews the person opens included, run in a helper as the run-as identity',
+  },
   '@deepseek-ai/dsh-otel': NONE,
   '@deepseek-ai/dsh-permission-presets': NONE,
   '@deepseek-ai/dsh-persona': NONE,
@@ -173,6 +175,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-shell-env': NONE,
   '@deepseek-ai/dsh-skill': NONE,
   '@deepseek-ai/dsh-skill-filesystem': NONE,
+  '@deepseek-ai/dsh-skill-office': { ...NONE, note: 'Office skill text the skill tool loads' },
   '@deepseek-ai/dsh-spill-local': NONE,
   '@deepseek-ai/dsh-spill-policy': NONE,
   '@deepseek-ai/dsh-storage': NONE,
@@ -205,6 +208,10 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   },
   '@deepseek-ai/dsh-tool-goal': { runs: 'in-process', tools: ['create_goal', 'get_goal', 'update_goal'], catalog: '@deepseek-ai/dsh-tool-goal' },
   '@deepseek-ai/dsh-tool-jobs': { runs: 'in-process', tools: ['job_kill', 'job_list', 'job_output'], catalog: '@deepseek-ai/dsh-tool-jobs' },
+  '@deepseek-ai/dsh-tool-office': {
+    runs: 'run-as', tools: ['office_convert', 'office_recalculate', 'office_render'], catalog: '@deepseek-ai/dsh-tool-office',
+    note: 'inputs resolve and read through the model roots as read does; office-kit converts as the run-as identity into a read-only root',
+  },
   '@deepseek-ai/dsh-tool-present': { runs: 'model-roots', tools: ['present'], catalog: '@deepseek-ai/dsh-tool-present' },
   '@deepseek-ai/dsh-tool-schedule': {
     runs: 'in-process', tools: ['schedule_create', 'schedule_edit', 'schedule_list', 'schedule_view'], catalog: '@deepseek-ai/dsh-tool-schedule',
@@ -268,9 +275,8 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
 }
 
 /**
- * Packages that load code into root dsh, start a root process for the model, send root dsh's requests to any address
- * the model names, loopback and private ones included, or run a document converter in root dsh on files the model names,
- * and the Office skills, which direct the model to that converter; no box may mount them.
+ * Packages that load code into root dsh, start a root process for the model, or send root dsh's requests to any address
+ * the model names, loopback and private ones included; no box may mount them.
  */
 const FORBIDDEN = [
   '@deepseek-ai/dsh-tool-cordis',
@@ -278,8 +284,6 @@ const FORBIDDEN = [
   '@deepseek-ai/dsh-experimental-ptc-runtime-python',
   '@deepseek-ai/dsh-subagent-dsh-sdk',
   '@deepseek-ai/dsh-web-fetch-http',
-  '@deepseek-ai/dsh-tool-office',
-  '@deepseek-ai/dsh-skill-office',
 ]
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
@@ -314,6 +318,9 @@ const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'
   'mcp__*': 'asks',
   'mcp__playwright-mcp__*': 'browser reads run',
   'mcp__sandboxes__*': 'asks',
+  office_convert: 'asks',
+  office_recalculate: 'asks',
+  office_render: 'asks',
   plan_read: 'runs',
   plugin_manager: 'asks',
   present: 'asks',
@@ -534,8 +541,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
 
   it('mounts none of the packages that would load code into root dsh or start a root process for the model', () => {
     expect(names.filter(name => FORBIDDEN.includes(name))).toEqual([])
-    // The Office previews the person opens stay; the Office tools and the skills that direct the model to them are off under root.
-    expect(names).toContain('@deepseek-ai/dsh-office-kit')
+    // The Office tools, previews and skills are on; office-kit converts as the run-as identity.
+    expect(names).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-office-kit', '@deepseek-ai/dsh-skill-office', '@deepseek-ai/dsh-tool-office']))
   })
 
   it('applies the containment rows', () => {
@@ -563,12 +570,13 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       modelRoots,
       readOnlyRoots: [
         '/var/lib/mumbo/attachments/attachments/v1', '/root/.dsh/skills', '/usr/local/share/mumbo/agents/skills', '/var/lib/mumbo/spill',
-        '/var/lib/mumbo/subprocess-spill',
+        '/var/lib/mumbo/subprocess-spill', '/var/lib/mumbo/office-outputs',
       ],
     })
     // The stores whose paths the model is told to read write where the read-only roots name, readable by agent's group.
     expect(byId('attachment-local')?.config).toEqual({ dshHome: '/var/lib/mumbo/attachments', groupReadable: true })
     expect(byId('spill-local')?.config).toEqual({ root: '/var/lib/mumbo/spill', groupReadable: true })
+    expect(byId('office-kit')?.config).toEqual({ outputDirectory: '/var/lib/mumbo/office-outputs', groupReadable: true })
     const superagent = evaluated(byId('dsh-superagent')?.config, CONTAINMENT_ENV) as { workDirectory?: string; workerDirectory?: string; ghConfigDirectory?: string } | undefined
     if (box === 'project') {
       // Ticket directories sit in a model root, created as agent; the worker files and the orchestrator's gh configuration are root's.

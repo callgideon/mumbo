@@ -247,6 +247,8 @@ const packageFileExtras: Readonly<Record<string, readonly string[]>> = {
   '@deepseek-ai/dsh-subprocess': ['lib/control.js'],
   // The change helper is a path-loaded entry the subprocess provider starts as its run-as identity.
   '@deepseek-ai/dsh-fs-local': ['lib/mutation-helper.js'],
+  // The conversion helper is a path-loaded entry the subprocess provider starts as its run-as identity.
+  '@deepseek-ai/dsh-office-kit': ['lib/convert-helper.js'],
   // SSH launches a private helper and shares wire definitions and TLS setup
   // between that helper and the connection owner.
   '@deepseek-ai/dsh-ssh': [

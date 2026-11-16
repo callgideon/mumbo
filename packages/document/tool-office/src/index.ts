@@ -1,9 +1,9 @@
 /**
  * Model-facing Office tools render document pages, convert documents, and recalculate workbooks through the shared
  * `officeKit` service. Tools are admitted after an Office skill loads; a missing service makes admitted calls fail
- * as `unavailable`. Reads use the filesystem backend's read authority; each call reads
+ * as `unavailable`. Inputs resolve and read as `read` resolves and reads them; each call reads
  * one source byte before the service runs, so a cached result never answers a call that cannot read the source.
- * Converted files stay in the Office kit's private output store; the model copies them into the workspace with the
+ * Converted files stay in the Office kit's output store; the model copies them into the workspace with the
  * shell, so these tools write no workspace file.
  * @module @deepseek-ai/dsh-tool-office
  */
@@ -238,11 +238,14 @@ async function prepareInput(ctx: Context, exec: ToolExecution, operation: Office
   return { agent, kit, target, source: officeSource(ctx, agent, target, info) }
 }
 
-/** Resolve an input through the filesystem backend and require a regular file. */
+/**
+ * Resolve a model-supplied input as `read` does, through `fs.resolveModelPath`, and require a regular file. A provider
+ * that confines the model to roots refuses a path outside them with `read`'s `FS_OUTSIDE_ROOTS` error, unchanged.
+ */
 async function readableInput(
   ctx: Context, path: string, options: { cwd: string; signal: AbortSignal },
 ): Promise<{ target: FsTarget; info: FsInfo }> {
-  const target = await ctx.fs.resolve(path, options)
+  const target = await ctx.fs.resolveModelPath(path, options)
   const info = await ctx.fs.stat(target, options.signal)
   if (info === undefined) throw new Error(`cannot read "${target.displayPath}": not found`)
   if (info.type !== 'file') throw new Error(`cannot read "${target.displayPath}": not a regular file`)

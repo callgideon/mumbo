@@ -3,6 +3,9 @@ import { lstatSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
+/** The remedy that follows every `unavailable` message for a Kit that is not installed or cannot be imported. */
+export const KIT_INSTALL_HINT = 'This deployment does not provide LibreOffice Kit; install or enable it as this deployment requires, then retry.'
+
 /**
  * Locate an engine package manifest for Kit.
  * @param name - Engine package name requested by Kit.

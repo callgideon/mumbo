@@ -1,5 +1,5 @@
 /** Image rendering, format conversion, and recalculation read bounded engine output from private scratch files. */
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
@@ -72,11 +72,14 @@ beforeEach(() => {
     dispose: vi.fn<Converter['dispose']>().mockResolvedValue(undefined),
   }
   kit.create.mockReset().mockImplementation(async () => converter)
+  // The provider refuses in-process conversions as root; these cases exercise the in-process converter under any uid.
+  if (process.getuid !== undefined) vi.spyOn(process, 'getuid').mockReturnValue(1000)
 })
 afterEach(async () => {
   outputDeletion.root = undefined
   outputDeletion.gate = undefined
   await ctx.fiber.dispose()
+  vi.restoreAllMocks()
 })
 
 async function mount(config: Partial<Config> = {}): Promise<OfficeKit> {
@@ -196,6 +199,23 @@ it('recalculates a workbook into the requested format', async () => {
   expect(result).toMatchObject({ bytes: XLSX.length, pageCount: 2, missingFonts: ['Calc Font'] })
   expect(await readFile(result.path)).toEqual(XLSX)
   expect(converter.recalculate.mock.calls[0]![0].outputPath.endsWith('output.xlsx')).toBe(true)
+})
+
+it.skipIf(process.platform === 'win32')('saves owner-only outputs by default', async () => {
+  const provider = await mount()
+  const result = await provider.recalculate({ extension: 'xlsx', format: 'xlsx', source: source(),
+    output: { owner: 'session', name: 'book.xlsx' } })
+  expect((await stat(result.path)).mode & 0o7777).toBe(0o600)
+  expect((await stat(dirname(result.path))).mode & 0o7777).toBe(0o700)
+})
+
+it.skipIf(process.platform === 'win32')('saves group-readable outputs when groupReadable is set', async () => {
+  const provider = await mount({ groupReadable: true })
+  await chmod(provider.outputDirectory, 0o2750)
+  const result = await provider.recalculate({ extension: 'xlsx', format: 'xlsx', source: source(),
+    output: { owner: 'session', name: 'book.xlsx' } })
+  expect((await stat(result.path)).mode & 0o7777).toBe(0o640)
+  expect((await stat(dirname(result.path))).mode & 0o7777).toBe(0o2750)
 })
 
 it.each([

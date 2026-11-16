@@ -2715,7 +2715,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-office-kit`
 
-- `source`: [`packages/document/office-kit/src/index.ts:38`](../packages/document/office-kit/src/index.ts)
+- `source`: [`packages/document/office-kit/src/index.ts:42`](../packages/document/office-kit/src/index.ts)
 
 ```ts config-catalog
 /** Provider concurrency and kit rendering/font configuration. */
@@ -2738,6 +2738,12 @@ export interface Config {
   maxSourceEntries: number
   /** Absolute directory for converted and recalculated files, with one subdirectory per Session. */
   outputDirectory: string
+  /**
+   * Let the output directory's group read converted and recalculated files but not change them: directories are
+   * created `0750` and files `0640`, so an `outputDirectory` owned by this process with another user's group and the
+   * set-group-ID bit passes that group to every directory and file below it. Defaults to `false` (`0700` and `0600`).
+   */
+  groupReadable: boolean
   /** Milliseconds a converted or recalculated file is kept. */
   outputRetentionMs: number
   /** Maximum bytes across retained converted and recalculated files; the oldest leave first. */

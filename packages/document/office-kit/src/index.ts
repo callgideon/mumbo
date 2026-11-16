@@ -1,4 +1,7 @@
-/** Host LibreOffice Kit provider with reusable converters, shared admission, and private disk input/output. */
+/**
+ * Host LibreOffice Kit provider with reusable in-process converters or a run-as conversion helper, shared admission,
+ * and private disk input/output.
+ */
 import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +14,8 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-session'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { resolveKitModule } from './locate.ts'
+import { ChildConverter, conversionFailure, helperDeadlineMs, type HelperConverterOptions, type OperationConverter } from './convert-child.ts'
+import { KIT_INSTALL_HINT, resolveKitModule } from './locate.ts'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { OfficeKitError } from './errors.ts'
 import { OfficeKitGeneration, type OfficeSourceKey } from './identity.ts'
@@ -54,6 +58,12 @@ export interface Config {
   maxSourceEntries: number
   /** Absolute directory for converted and recalculated files, with one subdirectory per Session. */
   outputDirectory: string
+  /**
+   * Let the output directory's group read converted and recalculated files but not change them: directories are
+   * created `0750` and files `0640`, so an `outputDirectory` owned by this process with another user's group and the
+   * set-group-ID bit passes that group to every directory and file below it. Defaults to `false` (`0700` and `0600`).
+   */
+  groupReadable: boolean
   /** Milliseconds a converted or recalculated file is kept. */
   outputRetentionMs: number
   /** Maximum bytes across retained converted and recalculated files; the oldest leave first. */
@@ -93,6 +103,7 @@ export const Config: z<Partial<Config>, Config> = z.object({
   maxCachedBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(134217728),
   maxSourceEntries: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(64),
   outputDirectory: z.string().min(1).default(dshHomePath('office-kit', 'outputs')),
+  groupReadable: z.boolean().default(false),
   outputRetentionMs: z.natural().min(1).max(2_147_483_647).default(24 * 60 * 60 * 1000),
   maxOutputStoreBytes: z.natural().min(1).max(Number.MAX_SAFE_INTEGER).default(512 * 1024 * 1024),
   timeoutMs: z.natural().min(1).max(2_147_483_647).default(60_000),
@@ -116,8 +127,6 @@ interface LoadedKit extends KitModule {
   readonly resolveEnginePackage: NonNullable<ConverterOptions['resolveEnginePackage']>
 }
 
-const KIT_INSTALL_HINT = 'This deployment does not provide LibreOffice Kit; install or enable it as this deployment requires, then retry.'
-
 interface Slot {
   busy: boolean
   converter?: Promise<Converter>
@@ -135,7 +144,7 @@ export class OfficeKit extends TypertRemoteService {
   private readonly slots: Slot[] = []
   private readonly queue: ConversionQueue
   private readonly outputs: OutputStore
-  private readonly options: Omit<ConverterOptions, 'resolveEnginePackage'>
+  private readonly options: HelperConverterOptions
   private loadedKit?: Promise<LoadedKit>
   private readonly reportedKitFailures = new Set<string>()
 
@@ -158,7 +167,7 @@ export class OfficeKit extends TypertRemoteService {
     this.queue = new ConversionQueue(config, this.generation, (bytes, request, signal) => this.runOperation(bytes, request, signal))
     this.outputDirectory = config.outputDirectory
     this.outputs = new OutputStore({ root: config.outputDirectory, retentionMs: config.outputRetentionMs,
-      maxBytes: config.maxOutputStoreBytes }, ctx.logger.warn.bind(ctx.logger))
+      maxBytes: config.maxOutputStoreBytes, groupReadable: config.groupReadable }, ctx.logger.warn.bind(ctx.logger))
     // The output store records this release, and its disposal below waits for the release to settle.
     ctx.on('session/disposed', (session) => { void this.outputs.release(session.id) })
     ctx.effect(() => async () => {
@@ -375,14 +384,7 @@ export class OfficeKit extends TypertRemoteService {
     slot.busy = true
     let directory: string | undefined
     try {
-      if (slot.converter === undefined) {
-        slot.converter = this.loadKit().then(({ createConverter, resolveEnginePackage }) =>
-          createConverter({ ...this.options, resolveEnginePackage })).catch((error: unknown) => {
-          delete slot.converter
-          throw error
-        })
-      }
-      const converter = await slot.converter
+      const converter = await this.converterFor(slot)
       signal.throwIfAborted()
       directory = await mkdtemp(join(tmpdir(), 'dsh-office-kit-'))
       const inputPath = join(directory, `source.${request.extension}`)
@@ -393,24 +395,37 @@ export class OfficeKit extends TypertRemoteService {
       return output
     } catch (cause) {
       signal.throwIfAborted()
-      if (cause instanceof OfficeKitError) throw cause
-      if (cause instanceof TypeError || cause instanceof RangeError) throw new OfficeKitError('invalid-request', cause.message, { cause })
-      const code = typeof cause === 'object' && cause !== null && 'code' in cause ? cause.code : undefined
-      switch (code) {
-        case 'input-too-large': case 'output-too-large': case 'invalid-document': case 'unsupported-format':
-        case 'invalid-output': case 'timeout': case 'unavailable':
-          throw new OfficeKitError(code, cause instanceof Error ? cause.message : 'LibreOffice conversion failed.', { cause })
-        default: throw new OfficeKitError('failed', 'LibreOffice conversion failed.', { cause })
-      }
+      throw conversionFailure(cause)
     } finally {
       try { if (directory !== undefined) await rm(directory, { recursive: true, force: true }) }
       finally { slot.busy = false }
     }
   }
 
+  /**
+   * Choose the converter of one operation. When the subprocess provider starts children as another identity, a
+   * conversion helper runs as that identity; when DSH runs as root without a child identity, the operation fails
+   * `unavailable` and nothing runs in-process; otherwise the slot's in-process Kit converter runs it.
+   */
+  private converterFor(slot: Slot): Promise<OperationConverter> {
+    const subprocess = this.ctx.get('subprocess')
+    if (subprocess?.childIdentity !== undefined) {
+      return Promise.resolve(new ChildConverter(subprocess, this.options, helperDeadlineMs(this.config.timeoutMs)))
+    }
+    if (process.getuid?.() === 0) {
+      return Promise.reject(new OfficeKitError('unavailable', 'Office conversion as root requires a subprocess provider that runs the converter as another user.'))
+    }
+    slot.converter ??= this.loadKit().then(({ createConverter, resolveEnginePackage }) =>
+      createConverter({ ...this.options, resolveEnginePackage })).catch((error: unknown) => {
+      delete slot.converter
+      throw error
+    })
+    return slot.converter
+  }
+
   /** Run one engine operation in a private scratch directory and read its complete, bounded output. */
   private async runEngine(
-    converter: Converter, inputPath: string, directory: string, operation: OfficeOperation, signal: AbortSignal,
+    converter: OperationConverter, inputPath: string, directory: string, operation: OfficeOperation, signal: AbortSignal,
   ): Promise<OfficeOperationOutput> {
     switch (operation.kind) {
       case 'pdf': {
@@ -442,7 +457,7 @@ export class OfficeKit extends TypertRemoteService {
   }
 
   private async renderPng(
-    converter: Converter, inputPath: string, directory: string, operation: Extract<OfficeOperation, { kind: 'images' }>,
+    converter: OperationConverter, inputPath: string, directory: string, operation: Extract<OfficeOperation, { kind: 'images' }>,
     signal: AbortSignal,
   ): Promise<OfficeOperationOutput> {
     const outputDir = join(directory, 'images')
@@ -453,7 +468,7 @@ export class OfficeKit extends TypertRemoteService {
       ...(operation.range === undefined ? {} : { range: operation.range }),
       ...(operation.dpi === undefined ? {} : { dpi: operation.dpi }),
       maxPages: operation.maxImages, maxPixels: operation.maxPixels, maxDimension: operation.maxDimension,
-    }, signal)
+    }, signal, operation.maxBytes)
     const declared = result.images.reduce((sum, image) => sum + image.byteLength, 0)
     if (declared > operation.maxBytes) {
       throw new OfficeKitError('output-too-large', `The rendered images total ${declared} bytes, above the ${operation.maxBytes}-byte limit.`)

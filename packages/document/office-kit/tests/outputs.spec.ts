@@ -1,5 +1,5 @@
 /** The output store keeps bounded, owner-scoped files and deletes only what it saved, apart from expired leftovers. */
-import { access, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
@@ -51,7 +51,7 @@ afterEach(async () => {
 
 function store(options: Partial<OutputStoreOptions> = {}) {
   const warn = vi.fn<(message: string) => void>()
-  const outputs = new OutputStore({ root: join(root, 'outputs'), retentionMs: 60_000, maxBytes: 8, ...options }, warn)
+  const outputs = new OutputStore({ root: join(root, 'outputs'), retentionMs: 60_000, maxBytes: 8, groupReadable: false, ...options }, warn)
   onTestFinished(() => outputs.dispose())
   return { outputs, warn }
 }
@@ -70,6 +70,19 @@ it('saves owner-only files under a per-owner directory with the requested name',
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     expect((await stat(dirname(path))).mode & 0o777).toBe(0o700)
   }
+})
+
+it.skipIf(process.platform === 'win32')('lets a set-group-ID root\'s group read saved files under any umask when groupReadable is set', async () => {
+  await mkdir(join(root, 'outputs'))
+  await chmod(join(root, 'outputs'), 0o2750)
+  const umask = process.umask(0o077)
+  onTestFinished(() => { process.umask(umask) })
+  const { outputs } = store({ groupReadable: true })
+  const path = await outputs.save('session', 'report.pdf', Uint8Array.of(1))
+  expect((await stat(path)).mode & 0o7777).toBe(0o640)
+  expect((await stat(dirname(path))).mode & 0o7777).toBe(0o2750)
+  expect((await stat(dirname(dirname(path)))).mode & 0o7777).toBe(0o2750)
+  expect((await stat(path)).gid).toBe((await stat(join(root, 'outputs'))).gid)
 })
 
 it('deletes the oldest files to stay within the byte budget and refuses a file above it', async () => {
