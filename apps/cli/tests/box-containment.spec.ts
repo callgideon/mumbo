@@ -173,7 +173,6 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-shell-env': NONE,
   '@deepseek-ai/dsh-skill': NONE,
   '@deepseek-ai/dsh-skill-filesystem': NONE,
-  '@deepseek-ai/dsh-skill-office': { ...NONE, note: 'Office skill text the skill tool loads' },
   '@deepseek-ai/dsh-spill-local': NONE,
   '@deepseek-ai/dsh-spill-policy': NONE,
   '@deepseek-ai/dsh-storage': NONE,
@@ -270,8 +269,8 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
 
 /**
  * Packages that load code into root dsh, start a root process for the model, send root dsh's requests to any address
- * the model names, loopback and private ones included, or run a document converter in root dsh on files the model names;
- * no box may mount them.
+ * the model names, loopback and private ones included, or run a document converter in root dsh on files the model names,
+ * and the Office skills, which direct the model to that converter; no box may mount them.
  */
 const FORBIDDEN = [
   '@deepseek-ai/dsh-tool-cordis',
@@ -280,6 +279,7 @@ const FORBIDDEN = [
   '@deepseek-ai/dsh-subagent-dsh-sdk',
   '@deepseek-ai/dsh-web-fetch-http',
   '@deepseek-ai/dsh-tool-office',
+  '@deepseek-ai/dsh-skill-office',
 ]
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
@@ -534,8 +534,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
 
   it('mounts none of the packages that would load code into root dsh or start a root process for the model', () => {
     expect(names.filter(name => FORBIDDEN.includes(name))).toEqual([])
-    // The Office previews and skills stay; only the in-process Office tools are off under root.
-    expect(names).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-office-kit', '@deepseek-ai/dsh-skill-office']))
+    // The Office previews the person opens stay; the Office tools and the skills that direct the model to them are off under root.
+    expect(names).toContain('@deepseek-ai/dsh-office-kit')
   })
 
   it('applies the containment rows', () => {
