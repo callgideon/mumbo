@@ -209,7 +209,7 @@ describe('setup', () => {
     await needs('github', 'agentCliMissing', { output: 'bin/gh must be a command name or an absolute path' }, { repository, cli: 'bin/gh' })
     await needs('github', 'agentCliSignedOut', {}, { repository, cli: program(join(dir, 'bin', 'gh-broken'), 'exit 1') })
     await needs('github', 'repositoryReadOnly', { account: 'Agent-Bot', repository: 'acme/widgets' }, { repository, cli: gh(join(dir, 'bin', 'gh-reader'), 'Agent-Bot', false) })
-    // A user account must be reported able to push; only a GitHub App's installation token reports no permissions.
+    // A user account must be reported able to push; a repository that reports no push access refuses too.
     await needs('github', 'repositoryReadOnly', { account: 'Agent-Bot', repository: 'acme/widgets' }, { repository, cli: gh(join(dir, 'bin', 'gh-unreported'), 'Agent-Bot', null) })
     // Signed in, but the account cannot read the repository, or the CLI names no account.
     const unreadable = program(join(dir, 'bin', 'gh-outsider'),
@@ -219,21 +219,20 @@ describe('setup', () => {
     await needs('github', 'agentCliNoAccount', {}, { repository, cli: program(join(dir, 'bin', 'gh-anonymous'), `echo '{}'`) })
     expect(() => executable('nothing-here', join(dir, 'bin'))).toThrow('nothing-here is not an executable file on PATH')
   })
-  it('takes a GitHub App\'s identity from the configuration, reads only the repository, and refuses only reported read-only access', async () => {
+  it('takes a GitHub App\'s identity from the configuration and reads only the repository, whatever permissions GitHub reports for it', async () => {
     const githubApp = { login: 'mumbo-bot[bot]', userId: 341797844 }
-    // An installation token: `/user` answers 403, and the repository reports no `permissions` unless `push` is given.
+    // An installation token: `/user` answers 403, and GitHub reports every repository permission false for it.
     const appGh = (file: string, push: string): string => program(file, `case "$*" in\n  "api user") echo 'HTTP 403' >&2; exit 1 ;;\n  "api repos/acme/"*" --jq {name: .full_name, push: .permissions.push}") echo '{"name":"acme/widgets","push":${push}}' ;;\n  *) exit 1 ;;\nesac`)
     const calls: string[][] = []
     const recording: Probe = argv => { calls.push(argv); return probe(argv) }
     const resolve = (cli: string) => resolveDeployment(machine({ githubApp }), { repository: 'acme/widgets', cli }, recording, probe, path)
-    const cli = appGh(join(dir, 'bin', 'gh-app'), 'null')
+    const cli = appGh(join(dir, 'bin', 'gh-app'), 'false')
     const deployment = await resolve(cli)
     expect(deployment.github).toEqual({ cli, login: 'mumbo-bot[bot]', noreply: '341797844+mumbo-bot[bot]@users.noreply.github.com' })
     expect(deployment.githubApp).toEqual(githubApp)
     expect(calls.map(argv => argv.slice(1, 3).join(' '))).toEqual(['api repos/acme/widgets'])
     expect((await resolve(appGh(join(dir, 'bin', 'gh-app-push'), 'true'))).repository).toBe('acme/widgets')
-    await expect(resolve(appGh(join(dir, 'bin', 'gh-app-reader'), 'false')))
-      .rejects.toEqual(setupError('github', 'repositoryReadOnly', { account: 'mumbo-bot[bot]', repository: 'acme/widgets' }))
+    expect((await resolve(appGh(join(dir, 'bin', 'gh-app-unreported'), 'null'))).repository).toBe('acme/widgets')
     // The edge serves only the project's repositories; another one answers 404.
     const outside = program(join(dir, 'bin', 'gh-app-outside'), `echo 'HTTP 404' >&2; exit 1`)
     await expect(resolve(outside)).rejects.toEqual(setupError('github', 'repositoryUnreadable',

@@ -160,9 +160,11 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   return result.success ? result.data : undefined
 }
 /**
- * Verify the agent's GitHub CLI identity and push access to the configured repository.
- * With `machine.githubApp` the identity is the App's bot and `/user` is not read; an installation token does not report
- * `permissions`, so only a reported read-only access refuses. Under run-as the CLI is kept by the real path checked,
+ * Verify the agent's GitHub CLI identity and its access to the configured repository: a user account must report push
+ * access. With `machine.githubApp` the identity is the App's bot, `/user` is not read and `permissions` is not checked:
+ * GitHub reports every repository permission false for an installation token, so the read alone shows access, and the
+ * token's writes rest on its issuer, such as the Mumbo edge, which serves only bound repositories with the permissions
+ * the installation approved and fails the read otherwise. Under run-as the CLI is kept by the real path checked,
  * GitHub's name for the repository, which the worker reports, must equal the configured one but for case, and `/user` is
  * read through `orchestrator`, because the worker answers `probe` through a gh configuration it can write.
  * @param machine - the machine settings.
@@ -199,7 +201,7 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   // Under run-as the worker answers this probe, so its answer may only correct the name's case, never pick another repository.
   if (machine.runAs && access.name.toLowerCase() !== remote.toLowerCase()) throw new SetupError('repositoryRenamed', { repository: remote, name: access.name })
   const repository = access.name
-  if (githubApp ? access.push === false : access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
+  if (!githubApp && access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
   return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
