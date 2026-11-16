@@ -59,7 +59,8 @@ test('a user box start script is byte-for-byte what it was before project boxes 
   // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
   // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
   // Then K1's state block and $STATE_PATCH after $RUNWILD_PATCH, behind the image's @mumbo/state (the state block test below).
-  assert.equal(createHash('sha256').update(s).digest('hex'), 'e80342f3c57887239c0d40c711ea13f90f4cc22f611179a225c99a1a5f3de893')
+  // Then B54: the rows' office-kit row and its read-only root, and the layout's /var/lib/mumbo/office-outputs (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '9c1662f86c6102f9bc77b03e0bdc0660f9005acec3aa52a7c9bcb49ac0809458')
 })
 
 test('a project box start script is byte-for-byte what it was before B18 changed the person desktop', () => {
@@ -99,7 +100,8 @@ test('a project box start script is byte-for-byte what it was before B18 changed
   // Then the repair also takes g+w from group root (but on a world-writable sticky directory), since dsh's run-as
   // provider refuses a server identity's PATH directory, or an ancestor of one, that any group can write and E2B's
   // finalize leaves /usr/local and /usr/local/bin 0777 (containment.test.mjs).
-  assert.equal(createHash('sha256').update(s).digest('hex'), '3092038fc5ab6f8fa162151e16ee904f35fe4c352fbf281871d31177b5db8296')
+  // Then B54: the rows' office-kit row and its read-only root, and the layout's /var/lib/mumbo/office-outputs (containment.test.mjs).
+  assert.equal(createHash('sha256').update(s).digest('hex'), '16dd848a3dac1b39f6eeb460350e3412b7f25ec17af5c70b2a83be48dbc145a6')
 })
 
 const POLICY = '{"PasswordManagerEnabled": false, "AutofillCreditCardEnabled": false}'
