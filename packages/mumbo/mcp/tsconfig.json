@@ -69,7 +69,7 @@
       "path": "../browser-consent"
     },
     {
-      "path": "../run-wild"
+      "path": "../run-wild/tsconfig.host.json"
     }
   ]
 }

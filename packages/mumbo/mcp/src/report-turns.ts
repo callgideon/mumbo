@@ -1,7 +1,8 @@
 /**
  * Report-started turns: in a turn that a project's report opened, only reading tools and `todo_write` run unasked;
- * every other tool asks the person first, and under Run Wild it is refused. The predicate is the `mumbo-report-turns`
- * service, so other consent can gate its own tools the same way.
+ * every other tool asks the person first, and under Run Wild it is refused and the refusal logged as a `runwild/decision`
+ * of kind `refusal`. The predicate is the `mumbo-report-turns` service, so other consent can gate its own tools the same
+ * way.
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,6 +17,18 @@ import { classify } from '@mumbo/browser-consent'
 import { inRunWild } from '@mumbo/run-wild'
 import { z } from 'zod'
 import type {} from './conversation.ts'
+
+/** The longest refusal summary this gate logs, in characters: the Run Wild record keeps summaries to the same length. */
+const REFUSAL_SUMMARY_LIMIT = 2000
+
+/**
+ * Clip a refused call's arguments for its `runwild/decision` summary.
+ * @param json - the arguments as JSON.
+ * @returns the JSON, or its first characters followed by `…`.
+ */
+function clipArguments(json: string): string {
+  return json.length <= REFUSAL_SUMMARY_LIMIT ? json : `${json.slice(0, REFUSAL_SUMMARY_LIMIT - 1)}…`
+}
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -114,7 +127,9 @@ function foldOrigin(state: Origin, event: SessionEvent): Origin {
 
 /**
  * Provide `mumbo-report-turns` and gate tools: in a report-started turn, a call that {@link runsUnasked} rejects asks
- * the person, and under Run Wild it is refused without asking. The gate decides before Run Wild can allow it, in either
+ * the person, and under Run Wild it is refused without asking, with a `runwild/decision` of kind `refusal` appended to
+ * the calling Agent's own Session: `target` the tool, `summary` the clipped arguments as JSON, `reason` the refusal the
+ * model receives. The gate decides before Run Wild can allow it, in either
  * listener order; a policy after it that denies still denies. The listener, the service and the host-only projection
  * behind it release with the calling fiber.
  * @param ctx - plugin context carrying `sessionProjections` and `permissionPresets`.
@@ -135,7 +150,11 @@ export async function gateReportTurns(ctx: Context): Promise<void> {
   ctx.on('tools/pre-execute', async (exec, next): Promise<PreToolDecision> => {
     const agent = exec.agent
     if (agent === undefined || runsUnasked(exec.name, exec.arguments) || !turns.reportStarted(agent)) return next()
-    if (inRunWild(ctx, agent)) return { kind: 'deny', reason: reportRefusal(exec.name) }
+    if (inRunWild(ctx, agent)) {
+      const reason = reportRefusal(exec.name)
+      agent.session.append('runwild/decision', { kind: 'refusal', target: exec.name, summary: clipArguments(JSON.stringify(exec.arguments)), reason })
+      return { kind: 'deny', reason }
+    }
     const decision = await next()
     return decision.kind === 'allow' ? { kind: 'ask', reason: REPORT_ASK } : decision
   }, { prepend: true })

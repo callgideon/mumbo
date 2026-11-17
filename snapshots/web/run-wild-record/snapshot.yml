@@ -1,0 +1,8 @@
+version: 1
+scenario: run-wild-record
+profile: web
+composition: web-run-wild-record
+recording: authored
+header:
+  class: web-default
+  pin: true

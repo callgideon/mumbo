@@ -1,5 +1,8 @@
 # Loader overlay (`dsh --patch`) for a person's box, after deploy/mumbo.overlay.yml. That overlay's `permission` row lists
 # the Run Wild preset when the start script sets MUMBO_RUN_WILD, which it does whenever it mounts this overlay.
+# The record's day files go under root's Harness home, which the agent's user can neither read nor change.
 - insert:
     - id: run-wild
       name: '@mumbo/run-wild'
+      config:
+        root: !!js dshHomePath('storages', 'runwild')

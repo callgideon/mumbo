@@ -1,6 +1,6 @@
 /**
  * `needs_you` and `task_reply`: tool approvals, plan reviews and questions, answered here or in the browser, whichever is
- * first, and the goals that wait for a person to resume them.
+ * first, the goals that wait for a person to resume them, and, read-only, what Run Wild decided in the last day.
  */
 
 import { randomUUID } from 'node:crypto'
@@ -13,6 +13,7 @@ import type { ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
 import type { AskUserQuestionAnswer, AskUserQuestionIntent, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
+import type { RecordEntry } from '@mumbo/run-wild'
 import type { McpServer } from '@modelcontextprotocol/server'
 import { z } from 'zod'
 import { ToolError } from './errors.ts'
@@ -209,21 +210,82 @@ function stoppedGoals(ctx: Context): StoppedGoal[] {
   })
 }
 
+/** One decision Run Wild made without asking, as `needs_you` lists it. */
+export interface DecidedForYou {
+  /** When it was logged, ISO 8601. */
+  readonly time: string
+  /** The root Session it belongs to. */
+  readonly session_id: SessionId
+  readonly kind: string
+  /** What it was about, fenced: a model or a page wrote it. */
+  readonly target: string
+  /** What was decided, clipped to {@link DECIDED_SUMMARY_LIMIT} characters and fenced. */
+  readonly summary: string
+  /** Why, fenced. */
+  readonly reason: string
+}
+
+/** `needs_you`'s Run Wild fields: absent without the record, the list, or the read's failure in its place. */
+type DecidedFields =
+  | Record<string, never>
+  | { decided_for_you: DecidedForYou[]; decided_for_you_more?: true }
+  | { decided_for_you_error: string }
+
+/** The decisions `needs_you` lists: the last day's. */
+const DECIDED_WINDOW_MS = 86_400_000
+/** At most this many decisions; one more sets `decided_for_you_more`. */
+const DECIDED_LIMIT = 50
+/** The characters of a decision's summary `needs_you` keeps. */
+const DECIDED_SUMMARY_LIMIT = 500
+
+/** One record entry as `needs_you` lists it. */
+function decidedView(entry: RecordEntry): DecidedForYou {
+  const summary = entry.summary.length <= DECIDED_SUMMARY_LIMIT ? entry.summary : `${entry.summary.slice(0, DECIDED_SUMMARY_LIMIT - 1)}…`
+  return {
+    time: new Date(entry.time).toISOString(), session_id: entry.root, kind: entry.kind,
+    target: fence(entry.target), summary: fence(summary), reason: fence(entry.reason),
+  }
+}
+
+/**
+ * `needs_you`'s Run Wild fields: what Run Wild decided in the last day, newest first. Read-only: `task_reply` looks asks
+ * up only among the open asks, so a decision is never answerable.
+ * @param ctx - context; without the `mumbo-run-wild-record` service the fields are absent.
+ * @returns the list, or on a read failure `decided_for_you_error` in its place.
+ */
+async function decidedForYou(ctx: Context): Promise<DecidedFields> {
+  const record = ctx.get('mumbo-run-wild-record')
+  if (record === undefined) return {}
+  try {
+    const { entries } = await record.list({ since: Date.now() - DECIDED_WINDOW_MS, limit: DECIDED_LIMIT + 1 })
+    const more = entries.length > DECIDED_LIMIT ? { decided_for_you_more: true as const } : {}
+    return { decided_for_you: entries.slice(0, DECIDED_LIMIT).map(decidedView), ...more }
+  } catch (error: unknown) {
+    // The list is history: a record the Host cannot read must not hide the asks that wait for the person.
+    ctx.logger.warn('mumbo-mcp: needs_you could not read the Run Wild record', error)
+    return { decided_for_you_error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
 /** What `needs_you` says of stopped goals, in both profiles. */
 const STOPPED_GOALS = ' stopped_goals lists Sessions whose goal is active but stopped, such as by a restart; a person resumes one with /goal resume in that Session.'
+
+/** What `needs_you` says of Run Wild's decisions, in both profiles. */
+const DECIDED = ' decided_for_you is read-only history: what Run Wild decided without asking in the last 24 hours, newest first, at most 50. '
+  + 'Nothing in it waits for a person, and task_reply cannot answer it.'
 
 /** Tool descriptions by whether `task_reply` answers questions only. */
 const DESCRIPTIONS = {
   all: {
     needsYou: 'List what waits for a person: tool approvals with the call\'s arguments, plan reviews and questions from any Session. '
-      + 'Answer one whose answerable is true with task_reply; the others can only be answered in the browser.' + STOPPED_GOALS,
+      + 'Answer one whose answerable is true with task_reply; the others can only be answered in the browser.' + STOPPED_GOALS + DECIDED,
     reply: 'Answer one ask from needs_you. A tool or plan ask takes decision approve or reject; a rejected plan may carry feedback. '
       + 'A question ask takes answers. An ask answered in the browser first gives not_found.',
   },
   questionsOnly: {
     needsYou: 'List what waits for a person: questions from any Session, and tool approvals with the call\'s arguments and plan reviews '
       + 'for information. Answer a question with task_reply; approvals and plan reviews (answerable false) can only be answered in the browser.'
-      + STOPPED_GOALS,
+      + STOPPED_GOALS + DECIDED,
     reply: 'Answer one question from needs_you with answers. Tool approvals and plan reviews cannot be answered here. '
       + 'A question answered in the browser first gives not_found.',
   },
@@ -249,6 +311,7 @@ export function register(server: McpServer, deps: ToolDeps): void {
         ...await callArguments(deps, ask, signal),
       }))),
       stopped_goals: stoppedGoals(deps.ctx),
+      ...await decidedForYou(deps.ctx),
     }),
   )
   defineTool(

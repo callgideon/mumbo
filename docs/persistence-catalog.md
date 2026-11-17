@@ -54,7 +54,7 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:plan/mode` | event | `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f` | [`{ type: "plan/mode" }`](#persistence-type-sha256-a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f) |
 | `event:request/context` | event | `37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf` | [`{ type: "request/context" }`](#persistence-type-sha256-37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf) |
 | `event:request/header` | event | `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41` | [`{ type: "request/header" }`](#persistence-type-sha256-4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41) |
-| `event:runwild/decision` | event | `1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a` | [`{ type: "runwild/decision" }`](#persistence-type-sha256-1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a) |
+| `event:runwild/decision` | event | `7efee6e1b424788e2c8ed0997a4bb2fed23388d184ce18599bbe7a76cc049e08` | [`{ type: "runwild/decision" }`](#persistence-type-sha256-7efee6e1b424788e2c8ed0997a4bb2fed23388d184ce18599bbe7a76cc049e08) |
 | `event:sandbox/mode` | event | `516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415` | [`{ type: "sandbox/mode" }`](#persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415) |
 | `event:schedule/change` | event | `a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb` | [`{ type: "schedule/change" }`](#persistence-type-sha256-a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb) |
 | `event:session-log-deepseek/delivery-accepted` | event | `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9` | [`{ type: "session-log-deepseek/delivery-accepted" }`](#persistence-type-sha256-d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9) |
@@ -813,12 +813,14 @@ Source: [`packages/core/session/src/types.ts:398`](../packages/core/session/src/
  * One ask that Run Wild decided instead of the person, appended inside the turn of the tool call that asked;
  * log-only audit, never model-visible (the model sees the tool result the decision caused). `target` is the tool
  * name, the plan's tool call id, the approval's subject, or the question id; `summary` is the ask's own text;
- * `reason` is why it was decided this way, and for a question it is the reply the model received.
+ * `reason` is why it was decided this way, and for a question it is the reply the model received. A `refusal` is a
+ * call refused without asking, such as `@mumbo/mcp`'s in a report-started turn: `target` is the tool name, `summary`
+ * the call's arguments as JSON, clipped to 2,000 characters, and `reason` the refusal the model received.
  */
 'runwild/decision': { kind: RunWildDecisionKind; target: string; summary: string; reason: string }
 ```
 
-Source: [`packages/mumbo/run-wild/src/index.ts:31`](../packages/mumbo/run-wild/src/index.ts)
+Source: [`packages/mumbo/run-wild/src/index.ts:38`](../packages/mumbo/run-wild/src/index.ts)
 
 ### `sandbox/*`
 
@@ -4829,7 +4831,7 @@ One of:
 - `"resume"`
 - `"series"`
 
-<a id="persistence-type-sha256-b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413"></a>
+<a id="persistence-type-sha256-0a87ebaec0c6cfd3a6367ef3842b9c04acdbd43970e7423320c9c8ae2336ad5d"></a>
 
 <a id="persistence-type-packagesmumborun-wildsrcindextsrunwilddecisionkind"></a>
 
@@ -4837,15 +4839,16 @@ One of:
 
 ### `RunWildDecisionKind`
 
-SHA-256: `b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413`
+SHA-256: `0a87ebaec0c6cfd3a6367ef3842b9c04acdbd43970e7423320c9c8ae2336ad5d`
 
-Sources: [`packages/mumbo/run-wild/src/index.ts:21`](../packages/mumbo/run-wild/src/index.ts)
+Sources: [`packages/mumbo/run-wild/src/index.ts:26`](../packages/mumbo/run-wild/src/index.ts)
 
 One of:
 
 - `"approval"`
 - `"plan-review"`
 - `"question"`
+- `"refusal"`
 
 <a id="persistence-type-sha256-fab2bb09bc5e3b9db0685e8f5500b029af1a2b33e70bc703c1d5d0f596fbc1fd"></a>
 
@@ -6833,17 +6836,17 @@ Sources: [`packages/core/session/src/types.ts:349`](../packages/core/session/src
 | `turn` | required | `number` |
 | `usage` | optional | [`TokenUsage`](#persistence-type-sha256-fec5442b9ee4122e10514d81d5a43648003fe8bfb7ee2ba50c0cdbdd383ed394) |
 
-<a id="persistence-type-sha256-27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee"></a>
+<a id="persistence-type-sha256-6b1e70b62e94b4ce30ee7c0c3c8e104b22ade994a986f6db9547d4e675f0b277"></a>
 
 ### `{ kind, reason, summary, target }`
 
-SHA-256: `27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee`
+SHA-256: `6b1e70b62e94b4ce30ee7c0c3c8e104b22ade994a986f6db9547d4e675f0b277`
 
-Sources: [`packages/mumbo/run-wild/src/index.ts:31`](../packages/mumbo/run-wild/src/index.ts)
+Sources: [`packages/mumbo/run-wild/src/index.ts:38`](../packages/mumbo/run-wild/src/index.ts)
 
 | Property | Presence | Type |
 |---|---|---|
-| `kind` | required | [`RunWildDecisionKind`](#persistence-type-sha256-b8cc7992f3effe30a261f3a17a24df9d10f44e8cf128b8a639196fac4f5a8413) |
+| `kind` | required | [`RunWildDecisionKind`](#persistence-type-sha256-0a87ebaec0c6cfd3a6367ef3842b9c04acdbd43970e7423320c9c8ae2336ad5d) |
 | `reason` | required | `string` |
 | `summary` | required | `string` |
 | `target` | required | `string` |
@@ -9356,17 +9359,17 @@ SHA-256: `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41`
 | `time` | required | `number` |
 | `type` | required | `"request/header"` |
 
-<a id="persistence-type-sha256-1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a"></a>
+<a id="persistence-type-sha256-7efee6e1b424788e2c8ed0997a4bb2fed23388d184ce18599bbe7a76cc049e08"></a>
 
 <a id="persistence-type-eventrunwilddecision"></a>
 
 ### `{ type: "runwild/decision" }`
 
-SHA-256: `1dab61b35564c8ba58b6343d7bc66e3ca4ddbaa00c42e317e4f4c12a8e06c36a`
+SHA-256: `7efee6e1b424788e2c8ed0997a4bb2fed23388d184ce18599bbe7a76cc049e08`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`{ kind, reason, summary, target }`](#persistence-type-sha256-27464613500f8962028e8942a5a56705845887fecf9df0e54211877019a63cee) |
+| `data` | required | [`{ kind, reason, summary, target }`](#persistence-type-sha256-6b1e70b62e94b4ce30ee7c0c3c8e104b22ade994a986f6db9547d4e675f0b277) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |

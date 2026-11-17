@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -24,7 +27,9 @@ const PRESETS = {
 } as const
 
 const ASK = "This turn started with a project's report, so every action but reading asks first: it runs with your box's sign-ins, such as GitHub."
-const refusal = (tool: string): string => `Error: ${tool} did not run: this turn started with a project's report, and in Run Wild such a turn runs only reading tools and todo_write. Say what you would do and why, so the person can reply to let it run.`
+/** The note a refused call's model receives, which its `refusal` decision logs as `reason`. */
+const refusalNote = (tool: string): string => `${tool} did not run: this turn started with a project's report, and in Run Wild such a turn runs only reading tools and todo_write. Say what you would do and why, so the person can reply to let it run.`
+const refusal = (tool: string): string => `Error: ${refusalNote(tool)}`
 
 const REPORT: MessageSource = { kind: 'report', project: brandString<ProjectId>('site0000000000aa') }
 const PERSON: MessageSource = { kind: 'user' }
@@ -71,7 +76,9 @@ async function mounted(order: Order = 'before Run Wild', state = false) {
   await ctx.plugin(PermissionPresetService, { presets: PRESETS })
   const gate = { name: 'report-gate', inject: ['sessionProjections', 'permissionPresets'], apply: gateReportTurns }
   const gated = order === 'before Run Wild' ? await ctx.plugin(gate) : undefined
-  await ctx.plugin(RunWild)
+  const root = mkdtempSync(join(tmpdir(), 'mumbo-report-turns-record-'))
+  onTestFinished(() => { rmSync(root, { recursive: true, force: true }) })
+  await ctx.plugin(RunWild, { root, retentionDays: 90 })
   const fiber = gated ?? await ctx.plugin(gate)
   const asked: (string | undefined)[] = []
   const person = { answer: 'rejected' as 'allowed-once' | 'rejected' }
@@ -313,11 +320,31 @@ describe('tools in a report-started turn', () => {
   it.each(['before Run Wild', 'after Run Wild'] as const)('bash is refused without asking under Run Wild, mounted %s', async (order) => {
     const { asked, create, run } = await mounted(order)
     const { agent } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
-    const refused = await run('bash', agent)
+    const command = { command: 'gh pr merge 12 --squash' }
+    const refused = await run('bash', agent, command)
     expect(refused.isError).toBe(true)
     expect(text(refused)).toBe(refusal('bash'))
     expect(asked).toEqual([])
-    expect(decisions(agent)).toEqual([])
+    expect(decisions(agent).map(event => event.data)).toEqual([{ kind: 'refusal', target: 'bash', summary: JSON.stringify(command), reason: refusalNote('bash') }])
+  })
+
+  it('logs a refused call\'s arguments clipped to the record\'s 2,000 characters', async () => {
+    const { create, run } = await mounted()
+    const { agent } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
+    await run('write', agent, { path: 'notes.md', content: 'x'.repeat(5000) })
+    const [summary] = decisions(agent).map(event => event.data.summary)
+    expect(summary).toHaveLength(2000)
+    expect(summary).toBe(`${JSON.stringify({ path: 'notes.md', content: 'x'.repeat(5000) }).slice(0, 1999)}…`)
+  })
+
+  it('appends a delegated child\'s refusal to the child\'s own Session', async () => {
+    const { ctx, create, run } = await mounted()
+    const { agent: root } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
+    const { agent: child } = await create('child', 'danger-full-access', [PERSON])
+    ctx.provide('subagents', { rootOf: (agent: Agent) => agent === child ? root : agent } as never)
+    expect(text(await run('bash', child, { command: 'ls' }))).toBe(refusal('bash'))
+    expect(decisions(child).map(event => event.data.kind)).toEqual(['refusal'])
+    expect(decisions(root)).toEqual([])
   })
 
   it.each(GATED)('%s is refused without asking under Run Wild', async (name) => {
@@ -325,6 +352,7 @@ describe('tools in a report-started turn', () => {
     const { agent } = await create('root', RunWild.RUN_WILD_PRESET, [REPORT])
     expect(text(await run(name, agent))).toBe(refusal(name))
     expect(asked).toEqual([])
+    expect(decisions(agent).map(event => [event.data.kind, event.data.target])).toEqual([['refusal', name]])
   })
 
   it('still refuses bash on the last step of a turn that compacted, refreshed its context and got a resume notice', async () => {

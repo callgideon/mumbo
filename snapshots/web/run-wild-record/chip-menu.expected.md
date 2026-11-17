@@ -1,0 +1,3 @@
+- menu:
+  - menuitem "What ran without asking"
+  - menuitem "Switch to Full access"
