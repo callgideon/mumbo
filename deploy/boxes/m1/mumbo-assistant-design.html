@@ -2701,7 +2701,11 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Amended [2026-11-23]: registration order can't guarantee it.</strong> Token registers first in practice, and either row reloading changes the order. So <code>register</code> gains one option that places a Provider ahead of the others, and only edge-member uses it. This departs from upstream's &quot;no priority between credential kinds&quot;, and <code>UPSTREAM.md</code> says why.</li>
 <li>Not chosen: refusing a request that carries both. Before the merge such a request was served as the member, and a browser can hold a still-valid owner cookie for a project host, since the signing record is restored from backup and the cookie lives 30 days. Refusing would lock that person out until they cleared cookies.</li>
 <li>As before the merge, a missing, expired or badly signed member header falls through to the other Providers.</li>
-<li>Second layer, its own change on the edge: member-forwarded requests carry no cookie. <span class="tag m">my call</span></li>
+<li>Second layer, its own change on the edge: member-forwarded requests carry no cookie. <span class="tag m">my call</span>
+<ul>
+<li><strong>Build review</strong> [2026-11-23]: approved at boxes/production 89b0a04632. <code>asMember</code> drops <code>Cookie</code> and adds the signed header on the HTTP proxy, the WebSocket upgrade and the relay. The test it replaces had asserted that a member request reached the box with a <code>dsh-auth</code> cookie, so the both-credentials case was reachable. It deploys apart from the sync, since the current image already prefers the member header.</li>
+</ul>
+</li>
 </ul>
 </li>
 <li><strong>Amended [2026-11-23]: non-owners are refused on every WebServer route that doesn't admit them.</strong> Our guard for this went with the removed admission code, and upstream's <code>required</code> would let a member reach every upstream plugin's HTTP and upgrade route, including ones that serve file bytes, outside the Gateway. The guard returns at upstream's central admission, with the same per-route opt-in the exact Fetch routes have. Opted in: the index and static assets, the shared <code>/api</code> channel, and edge-member's own routes. The PR's route table covers upstream's routes too. <span class="tag m">my call</span></li>
