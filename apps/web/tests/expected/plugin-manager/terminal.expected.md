@@ -1,0 +1,5 @@
+- listitem:
+  - button "View Persistent terminals": Persistent terminals
+  - text: Experimental Gives the agent terminals that open as sidebar tabs you can watch and take over by typing in them. Processes keep running between tool calls, so it can start a dev server or REPL and come back later to read output; it can also read terminals you open yourself.
+  - status
+  - switch "Enable Persistent terminals"

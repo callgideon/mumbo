@@ -1,4 +1,3 @@
-- button "Local changes"
-- text: HEAD → origin/main
-- 'button "View the changes of this Session: 1 files, 1 lines added, 0 lines deleted"': +1 −0 1 files
-- button "Create change request"
+- button "Local changes · 1 files, 1 lines added, 0 lines deleted": Local changes · 1 files
+- text: +1 −0
+- button "Local changes actions"

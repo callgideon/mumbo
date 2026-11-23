@@ -8,6 +8,7 @@
  * remote-access snapshot owner itself and renders the real slot tree, so the Workspace access Hooks,
  * and the access New Session follows, are the renderer's bindings over one snapshot.
  */
+import { syncedConfig } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, screen, within } from '@testing-library/react'
 import type { Context } from '@deepseek-ai/cordis'
@@ -53,9 +54,10 @@ async function services(access: ClientAccessState) {
     apply(ctx: Context) {
       ctx.provide('remoteAccess', {
         source: (kind: TypertResourceKind, id: string, action: string) => access.resource(kind, id, action),
-        whenAccess: (action: RemoteEndpoint, callback: () => AccessEffect) => whenAllowed(ctx, access.global(action), callback, action),
+        whenAccess: (action: RemoteEndpoint, callback: () => AccessEffect) =>
+          whenAllowed(ctx, access.global(action), callback, `access-assembly: ${action}`),
         whenResourceAccess: (kind: TypertResourceKind, id: string, action: RemoteEndpoint, callback: () => AccessEffect) =>
-          whenAllowed(ctx, access.resource(kind, id, action), callback, `${kind}:${id}:${action}`),
+          whenAllowed(ctx, access.resource(kind, id, action), callback, `access-assembly: ${kind}:${id}:${action}`),
       })
       ctx.slots.provideRoot({ keyedHooks: { remoteAccess: action => access.global(action) } })
     },
@@ -94,8 +96,8 @@ async function bench(access: ClientAccessState, options: { ungroupedSession?: Se
     { 'sidebar.workspaces': { kind: 'single', scope: 'root', inject: SECTION_INJECT } } as never,
     SidebarFrame as never,
   )
-  await runtime.mount({ inject: [...injectMenus], apply: applyMenus })
-  await runtime.mount({ inject: [...inject], apply })
+  await runtime.mount({ inject: [...injectMenus], apply: applyMenus }, syncedConfig({ resolutionTimeoutMs: 1000 }))
+  await runtime.mount({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 }))
   return runtime
 }
 
@@ -187,8 +189,8 @@ async function shellBench(access: ClientAccessState) {
     { 'sidebar': { kind: 'single', scope: 'root' }, 'shell.leading': { kind: 'single', scope: 'root' } } as never,
     ShellFrame as never,
   )
-  await runtime.mount({ inject: [...injectMenus], apply: applyMenus })
-  await runtime.mount({ inject: [...inject], apply })
+  await runtime.mount({ inject: [...injectMenus], apply: applyMenus }, syncedConfig({ resolutionTimeoutMs: 1000 }))
+  await runtime.mount({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 }))
   await runtime.mount({ inject: [...injectSidebar], apply: applySidebar })
   return runtime
 }

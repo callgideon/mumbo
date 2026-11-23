@@ -555,8 +555,9 @@ describe('sidebar Session rows', () => {
 
   /** The row's status description, or null while it shows no status. */
   function statusOf(button: HTMLElement): string | null {
-    const id = button.getAttribute('aria-describedby')
-    return id === null ? null : document.getElementById(id)?.textContent ?? null
+    const text = (button.getAttribute('aria-describedby') ?? '').split(' ')
+      .map(id => document.getElementById(id)?.textContent ?? '').join('')
+    return text === '' ? null : text
   }
 
   it.each([false, true])('leads Plugins by order and opens its Session, active only while that Session is the main view, with collapsed=%s', async (collapsed) => {
@@ -660,5 +661,70 @@ describe('sidebar Session rows', () => {
     await runtime.sessions.add({ id: MUMBO })
     fireEvent.click(await within(navigation).findByRole('button', { name: 'Mumbo' }))
     expect(openSession).toHaveBeenCalledExactlyOnceWith(MUMBO)
+  })
+})
+
+/** Trailing content that names the row state it receives; its visible count is decorative and its text describes the row. */
+function Count({ wide, active }: PropsRuntime<'sidebar.panellist.trailing'>) {
+  return (
+    <span data-testid="count" data-wide={wide} data-active={active}>
+      <span aria-hidden="true">{wide ? '6' : '•'}</span>
+      <span>6 waiting</span>
+    </span>
+  )
+}
+
+async function mountCount(runtime: SlotTestRuntime, id: MainPanelId) {
+  return runtime.mount({
+    inject: ['slots'],
+    apply(ctx: Context) {
+      ctx.slots.inject('sidebar.panellist.trailing', () => ctx.slots.register({ name: 'sidebar.panellist.trailing', id }, Count))
+    },
+  })
+}
+
+describe('sidebar panel trailing content', () => {
+  it('shows a panel registration in its own row only, describing the row button, and follows the selection', async () => {
+    const { runtime, locale, view } = await bench()
+    await mountPanels(runtime, locale)
+    await mountCount(runtime, ALPHA)
+
+    const alpha = await view.findByRole('button', { name: 'Alpha panel' })
+    const beta = view.getByRole('button', { name: 'Beta panel' })
+    expect(alpha.getAttribute('aria-describedby')).not.toBeNull()
+    const described = document.getElementById(alpha.getAttribute('aria-describedby') ?? '')
+    expect(described?.textContent).toBe('66 waiting')
+    expect(within(described as HTMLElement).getByTestId('count').dataset).toMatchObject({ wide: 'true', active: 'false' })
+    expect(document.getElementById(beta.getAttribute('aria-describedby') ?? '')?.textContent).toBe('')
+    expect(view.getAllByTestId('count')).toHaveLength(1)
+    // The content sits inside the row button after its title; the slot wrappers are inline spans, so nesting stays valid.
+    expect(alpha.contains(described)).toBe(true)
+    expect(described?.previousElementSibling?.textContent).toBe('Alpha panel')
+    const wrappers = [...(described?.querySelectorAll('[data-slot]') ?? [])]
+    expect(wrappers.length).toBeGreaterThan(0)
+    expect(wrappers.every(wrapper => wrapper.tagName === 'SPAN')).toBe(true)
+    expect(described?.querySelector('div')).toBeNull()
+
+    fireEvent.click(alpha)
+    await waitFor(() => { expect(view.getByTestId('count').dataset.active).toBe('true') })
+  })
+
+  it('tells the collapsed rail it is not wide', async () => {
+    const { runtime, locale, view } = await bench(true)
+    await mountPanels(runtime, locale)
+    await mountCount(runtime, BETA)
+
+    await waitFor(() => { expect(view.getByTestId('count').dataset.wide).toBe('false') })
+  })
+
+  it('removes the content when its registering fiber is disposed', async () => {
+    const { runtime, locale, view } = await bench()
+    await mountPanels(runtime, locale)
+    const count = await mountCount(runtime, ALPHA)
+    await view.findByTestId('count')
+
+    await act(async () => { await count.dispose() })
+    expect(view.queryByTestId('count')).toBeNull()
+    expect(view.getByRole('button', { name: 'Alpha panel' })).toBeTruthy()
   })
 })

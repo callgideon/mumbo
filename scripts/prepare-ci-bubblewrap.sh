@@ -15,6 +15,13 @@ readonly BUBBLEWRAP_FALLBACK_URLS=(
   "https://mirrors.edge.kernel.org/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
   "http://archive.ubuntu.com/ubuntu/pool/main/b/bubblewrap/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
 )
+# Workflows that run on ephemeral runners restore and save this directory as
+# `~/.cache/dsh-ci/bubblewrap` with actions/cache, so a warm cache needs no
+# Launchpad request; the persistent self-hosted pool keeps the directory itself.
+readonly BUBBLEWRAP_CACHE_DIR="${HOME}/.cache/dsh-ci/bubblewrap"
+
+# shellcheck source=scripts/ci-verified-download.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/ci-verified-download.sh"
 
 : "${RUNNER_TEMP:?prepare-ci-bubblewrap requires RUNNER_TEMP}"
 : "${GITHUB_PATH:?prepare-ci-bubblewrap requires GITHUB_PATH}"
@@ -24,13 +31,12 @@ if [[ "$(uname -s)" != 'Linux' || "$(uname -m)" != 'x86_64' ]]; then
   exit 1
 fi
 
-archive="${RUNNER_TEMP}/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
+archive="${BUBBLEWRAP_CACHE_DIR}/bubblewrap_${BUBBLEWRAP_VERSION}_amd64.deb"
 root="${RUNNER_TEMP}/dsh-bubblewrap"
 
 fetched=
 for url in "$BUBBLEWRAP_URL" "${BUBBLEWRAP_FALLBACK_URLS[@]}"; do
-  if curl --fail --silent --show-error --location --connect-timeout 15 --max-time 120 --retry 2 --retry-all-errors --output "$archive" "$url" \
-    && printf '%s  %s\n' "$BUBBLEWRAP_SHA256" "$archive" | sha256sum --check --status; then
+  if acquire_verified_archive "$url" "$BUBBLEWRAP_SHA256" "$archive"; then
     fetched=1
     break
   fi

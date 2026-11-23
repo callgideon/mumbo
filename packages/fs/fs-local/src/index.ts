@@ -20,8 +20,9 @@ import { watch } from 'chokidar'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import z from '@deepseek-ai/schemastery'
-import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FileSystem, FsError, type FsTargetKey, type FsVersion } from '@deepseek-ai/dsh-fs'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import type {
   FsDeleteOutcome,
   FsMoveOutcome,
@@ -350,7 +351,7 @@ export class LocalFileSystem extends FileSystem {
     const displayPath = localDisplayPath(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
     const targetKey = await this.walkModelPath(roots, displayPath)
     if (!roots.some(root => isUnder(root.canonical, targetKey))) throw this.outsideRoots(roots, displayPath)
-    return { targetKey: FsTargetKey(targetKey), displayPath }
+    return { targetKey: brandString<FsTargetKey>(targetKey), displayPath }
   }
 
   /**
@@ -497,7 +498,7 @@ export class LocalFileSystem extends FileSystem {
     return entries.map(entry => escapes(entry) ? {
       name: entry.name,
       type: 'other' as const,
-      target: { targetKey: FsTargetKey(join(target.targetKey, entry.name)), displayPath: entry.target.displayPath },
+      target: { targetKey: brandString<FsTargetKey>(join(target.targetKey, entry.name)), displayPath: entry.target.displayPath },
     } : ({
       name: entry.name,
       type: entry.type,
@@ -712,7 +713,7 @@ export class LocalFileSystem extends FileSystem {
    * concurrent unlink between rename and stat; fall back to a sentinel version. */
   private versionAfterWrite(after: { version: FsVersion } | null, target: FsTarget): FsVersion {
     if (after) return after.version
-    return FsVersion(`missing:${target.targetKey}`)
+    return brandString<FsVersion>(`missing:${target.targetKey}`)
   }
 }
 

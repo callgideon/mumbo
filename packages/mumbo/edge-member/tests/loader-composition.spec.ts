@@ -2,7 +2,8 @@
  * The member plugin in a real Loader composition: Web carrier, Connection, Gateway, remote access, and the browser
  * upload and Session log routes. A request carrying the edge-signed header reaches Remote methods and those routes
  * as the `edge-member` principal on the Sessions the box stores, lists, or runs, including the terminal controller's
- * methods; a tampered, expired, or missing header is not a member, and a member reaches no settings method.
+ * methods; a tampered, expired, or missing header is not a member, and a member reaches no settings method, no
+ * dedicated RPC channel, and no exact Fetch route without declared access.
  */
 
 import { randomBytes } from 'node:crypto'
@@ -16,7 +17,8 @@ import RemoteAccessService, { type RemoteAccessRole } from '@deepseek-ai/dsh-api
 import TerminalController from '@deepseek-ai/dsh-api-terminal-controller'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
 import FileUploads from '@deepseek-ai/dsh-client-file-upload'
-import WebServer from '@deepseek-ai/dsh-host-webserver'
+import * as AuthenticationToken from '@deepseek-ai/dsh-host-authentication-token'
+import WebServer, { type WebEntryUrl } from '@deepseek-ai/dsh-host-webserver'
 import { SESSION_FORMAT_VERSION, type SessionHeader } from '@deepseek-ai/dsh-session'
 import * as SessionLogExport from '@deepseek-ai/dsh-session-log-export'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -124,6 +126,7 @@ async function start(listed?: Promise<void>): ReturnType<typeof startLoader> {
     ['@deepseek-ai/dsh-api-gateway', TypertGatewayService],
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-client-connection', Connection],
+    ['@deepseek-ai/dsh-host-authentication-token', AuthenticationToken],
     ['@deepseek-ai/dsh-client-file-upload', FileUploads],
     ['@deepseek-ai/dsh-session-log-export', SessionLogExport],
     ['@mumbo/edge-member', EdgeMember],
@@ -145,16 +148,36 @@ async function boot(): Promise<{ readonly origin: string; readonly probe: Prompt
   return { origin: `http://127.0.0.1:${String(ctx.webServer.port)}`, probe }
 }
 
-/** Exchange the Host's launch token for the owner's browser cookie. */
-function ownerCookie(origin: string): string {
-  const target = new URL(context!.connection.authenticatedUrl(origin))
-  let setCookie: string | undefined
-  context!.connection.authorizeIndex({ method: 'GET', url: `${target.pathname}${target.search}`, headers: { host: target.host } }, {
-    writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
-    end() {},
-  })
-  if (setCookie === undefined) throw new Error('no owner cookie')
+/** Exchange the Token plugin's entry URL for the owner's browser cookie over HTTP. */
+async function ownerCookie(origin: string): Promise<string> {
+  const entries: WebEntryUrl[] = []
+  context!.emit(context!.webServer, 'webserver/entry-url', origin, entries)
+  const entry = entries[0]
+  if (entry === undefined) throw new Error('no entry URL')
+  const response = await fetch(entry.url, { redirect: 'manual' })
+  const setCookie = response.headers.get('set-cookie')
+  if (setCookie === null) throw new Error('no owner cookie')
   return setCookie.split(';', 1)[0]!
+}
+
+/**
+ * Register a dedicated RPC channel and an exact Fetch route that declares no member access.
+ * @returns the calls that reached either handler.
+ */
+function ownerOnlyRoutes(): string[] {
+  const reached: string[] = []
+  context!.connection.rpc.handle('/owner-rpc', async (endpoint) => {
+    reached.push(endpoint)
+    return { ok: true, value: null }
+  })
+  context!.connection.fetch.register({
+    path: '/api/owner.only', methods: ['GET'], requestBody: 'buffered',
+    fetch: async () => {
+      reached.push('owner.only')
+      return new Response('served')
+    },
+  })
+  return reached
 }
 
 /** POST with the member header sent twice, which node:http forwards as two header lines. */
@@ -395,7 +418,7 @@ describe('real Loader composition', () => {
 
   it('lets an owner cookie through when the member header is invalid, and refuses a repeated header', { timeout: 60_000 }, async () => {
     const { origin, probe } = await boot()
-    const cookie = ownerCookie(origin)
+    const cookie = await ownerCookie(origin)
     const expired = signMemberHeader(KEY, 'ann@example.com', now() - 1)
     const owner = await call(origin, 'session/prompt', { request: { sessionId: 's2', text: 'hi' } }, expired, { cookie })
     expect(owner.body).toMatchObject({ result: { ok: true } })
@@ -403,6 +426,53 @@ describe('real Loader composition', () => {
     const valid = signMemberHeader(KEY, 'ann@example.com', now() + 300)
     await expect(callWithRepeatedHeader(origin, [valid, valid])).resolves.toBe(401)
     expect(probe.callers).toEqual([undefined])
+  })
+
+  it('refuses a member on a dedicated RPC channel and serves the owner', { timeout: 60_000 }, async () => {
+    const { origin } = await boot()
+    const reached = ownerOnlyRoutes()
+    const post = (headers: Record<string, string>) => fetch(`${origin}/owner-rpc/probe/run`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify({ type: 'client-request', rpcId: 'r1', method: 'probe/run', payload: {} }),
+    })
+    const member = await post({ 'x-mumbo-member': signMemberHeader(KEY, 'ann@example.com', now() + 300) })
+    expect({ status: member.status, body: await member.text() }).toEqual({ status: 403, body: 'forbidden' })
+    expect(reached).toEqual([])
+    const owner = await post({ cookie: await ownerCookie(origin) })
+    expect(await owner.json()).toMatchObject({ result: { ok: true, value: null } })
+    expect(reached).toEqual(['probe/run'])
+  })
+
+  it('refuses a member on an exact Fetch route that declares no access and serves the owner', { timeout: 60_000 }, async () => {
+    const { origin } = await boot()
+    const reached = ownerOnlyRoutes()
+    const member = await fetch(`${origin}/api/owner.only`, { headers: { 'x-mumbo-member': signMemberHeader(KEY, 'ann@example.com', now() + 300) } })
+    expect({ status: member.status, body: await member.text() }).toEqual({ status: 403, body: 'forbidden' })
+    expect(reached).toEqual([])
+    const owner = await fetch(`${origin}/api/owner.only`, { headers: { cookie: await ownerCookie(origin) } })
+    expect(await owner.text()).toBe('served')
+    expect(reached).toEqual(['owner.only'])
+  })
+
+  it('admits no member Peer for an expired or badly signed header', { timeout: 60_000 }, async () => {
+    await boot()
+    const admit = (header: string) => context!.connection.admit({ headers: { host: '127.0.0.1', 'x-mumbo-member': header } })
+    expect(admit(signMemberHeader(KEY, 'ann@example.com', now() - 1))).toEqual({ rejection: 401 })
+    expect(admit(signMemberHeader(randomBytes(32), 'ann@example.com', now() + 300))).toEqual({ rejection: 401 })
+    const admitted = admit(signMemberHeader(KEY, 'ann@example.com', now() + 300))
+    expect('peer' in admitted ? admitted.peer.principal : admitted).toEqual(MEMBER)
+  })
+
+  it('withdraws the authentication Provider with the plugin and keeps the Peer it admitted disposed', { timeout: 60_000 }, async () => {
+    const { loader, settled } = await start()
+    await settled
+    const request = { headers: { host: '127.0.0.1', 'x-mumbo-member': signMemberHeader(KEY, 'ann@example.com', now() + 300) } }
+    const admitted = context!.connection.admit(request)
+    if (!('peer' in admitted)) throw new Error('member was not admitted')
+    await [...loader.entries()].find(entry => entry.options.id === 'mumbo-edge-member')!.fiber!.dispose()
+    expect(admitted.peer.signal.aborted).toBe(true)
+    expect(context!.connection.admit(request)).toEqual({ rejection: 401 })
   })
 
   it('reads the member header from Fetch headers too, and refuses a repeated one there', { timeout: 60_000 }, async () => {

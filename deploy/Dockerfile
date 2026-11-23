@@ -1,5 +1,5 @@
 # Mumbo web image: one Node process serves the GUI and the API (docs/user/guide/public-deployments.md).
-FROM node:24-bookworm AS build
+FROM node:24.22.3-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3 curl && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}" CI=1

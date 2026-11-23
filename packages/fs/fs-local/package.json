@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-fs-local",
   "description": "Local-filesystem implementation of the DeepSeek Harness filesystem seam (ctx.fs)",
-  "version": "0.2.2-rc.2",
+  "version": "0.2.3-alpha.2",
   "publishConfig": {
     "access": "public"
   },
@@ -43,6 +43,7 @@
     "@deepseek-ai/dsh-home-paths": "workspace:*"
   },
   "dependencies": {
+    "@deepseek-ai/dsh-brand": "workspace:*",
     "chokidar": "5.0.0",
     "koffi": "3.1.1",
     "@deepseek-ai/schemastery": "workspace:~",

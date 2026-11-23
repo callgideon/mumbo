@@ -1,0 +1,81 @@
+- 'img "Change request state: Needs attention"'
+- text: "Add the pull request panel #7"
+- 'button "Commits shown: All commits"': All commits
+- button "Submit review"
+- button "Open in browser"
+- radiogroup "Review layer":
+  - radio "All 1" [checked]
+  - radio "Interface 0"
+  - radio "Implementation 1"
+  - radio "Tests 0"
+- button "All 1 files"
+- switch "Hide test files"
+- 'button "Filter lens: Exports"': Exports 1
+- button "Notes 0" [pressed]
+- progressbar "Viewed files": 0 / 1 viewed
+- text: +2 −2
+- button "Refresh changes"
+- button "Collapse all files"
+- button "Side by side" [pressed]
+- button "Line wrap" [pressed]
+- button "Move file tree to the right" [expanded]
+- region "All 1 files":
+  - button "Collapse panel.ts" [expanded]
+  - text: src/panel.ts +2 −2
+  - checkbox "Mark panel.ts as viewed"
+  - button "More actions for panel.ts"
+  - button "Select line L1": "1"
+  - text: export const n1 = 1
+  - button "Select line R1": "1"
+  - text: export const n1 = 1
+  - button "Select line L2": "2"
+  - text: export const n2 = 2
+  - button "Select line R2": "2"
+  - text: export const n2 = 'two'
+  - button "Select line L3": "3"
+  - text: export const n3 = 3
+  - button "Select line R3": "3"
+  - text: export const n3 = 3
+  - button "Select line L4": "4"
+  - text: export const n4 = 4
+  - button "Select line R4": "4"
+  - text: export const n4 = 4
+  - button "Select line L5": "5"
+  - text: export const n5 = 5
+  - button "Select line R5": "5"
+  - text: export const n5 = 5
+  - button "6 unchanged lines"
+  - button "Select line L12": "12"
+  - text: export const n12 = 12
+  - button "Select line R12": "12"
+  - text: export const n12 = 12
+  - button "Select line L13": "13"
+  - text: export const n13 = 13
+  - button "Select line R13": "13"
+  - text: export const n13 = 13
+  - button "Select line L14": "14"
+  - text: export const n14 = 14
+  - button "Select line R14": "14"
+  - text: export const n14 = 14
+  - button "Select line L15": "15"
+  - text: export const n15 = 15
+  - button "Select line R15": "15"
+  - text: export const n15 = 'fifteen'
+  - button "Select line L16": "16"
+  - text: export const n16 = 16
+  - button "Select line R16": "16"
+  - text: export const n16 = 16
+  - button "Select line L17": "17"
+  - text: export const n17 = 17
+  - button "Select line R17": "17"
+  - text: export const n17 = 17
+  - button "Select line L18": "18"
+  - text: export const n18 = 18
+  - button "Select line R18": "18"
+  - text: export const n18 = 18
+  - button "Remaining unchanged lines"
+- separator "Resize file tree"
+- navigation "All 1 files":
+  - textbox "Filter files…"
+  - button "src" [expanded]
+  - button "src/panel.ts": panel.ts +2 −2

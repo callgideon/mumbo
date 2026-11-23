@@ -39,7 +39,7 @@
     - switch "Enable Auto authorization review"
   - listitem:
     - button "View Change requests & worktrees": Change requests & worktrees
-    - text: "Experimental Keep linked GitHub pull requests beside your conversation: follow checks and reviews, inspect diffs, and send feedback to the agent. Review local changes and use a separate worktree to isolate each task. GitHub features require the gh CLI installed and signed in on the host."
+    - text: "Experimental Keep linked change requests beside your conversation, both GitHub pull requests and GitLab merge requests: follow checks and reviews, inspect diffs, and send feedback to the agent. Review local changes and use a separate worktree to isolate each task. GitHub features require the gh CLI installed and signed in on the host. GitLab merge requests require the glab CLI signed in on the host."
     - status
     - switch "Enable Change requests & worktrees"
 - heading "Installed plugins" [level=3]

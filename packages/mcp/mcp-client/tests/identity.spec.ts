@@ -20,10 +20,14 @@ import type {
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import * as McpClient from '../src/index.ts'
+import type { ConfigInput } from '../src/config.ts'
+import { McpClientHost } from '../src/host.ts'
+import { probeServer } from '../src/probe.ts'
 import { publicToolName } from '../src/tools.ts'
 import { createTransport } from '../src/transport.ts'
 import { TestCredentials } from './credential-fixture.ts'
@@ -46,6 +50,7 @@ function directory(): string {
 async function mountRegistry(): Promise<Context> {
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(NativeToolExecutor)
@@ -173,7 +178,7 @@ linux('a stdio server started through the run-as provider', () => {
     const refusal = 'command or args reference ${credential:MCP_TOKEN}, which would put the credential in the server\'s command line'
     for (const exposed of [{ args: [fixture, '--token=${credential:MCP_TOKEN}'] }, { command: '${credential:MCP_TOKEN}' }]) {
       const config = anonymous({ ...exposed, expandTemplates: true })
-      expect(await McpClient.probeServer(ctx, config)).toMatchObject({ ok: false, message: expect.stringContaining(refusal) as string })
+      expect(await probeServer(ctx, config)).toMatchObject({ ok: false, message: expect.stringContaining(refusal) as string })
       await expect(ctx.plugin(McpClient, config)).rejects.toMatchObject({ cause: { message: expect.stringContaining(refusal) as string } })
     }
     expect(spawn).not.toHaveBeenCalled()
@@ -223,6 +228,48 @@ async function fakeService(options: {
   await ctx.plugin(SpawnOnly)
   return { ctx, stdin, stdout, done, terminate, specs }
 }
+
+describe('validation of a stdio server that names an identity and roots', () => {
+  const input = {
+    transport: 'stdio', serverName: 'ident', command: process.execPath, args: [fixture], identity: 'browsermcp', roots: ['/var/lib/mumbo/uploads'],
+  } satisfies ConfigInput
+
+  it('keeps identity and roots through the entry schema and the host, so the server starts as the identity it names', async () => {
+    // A box's provider: children run as a run-as identity, and a server that names no identity runs as mcpserver.
+    const service = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] }, serverIdentity: { name: 'mcpserver', home: '/home/mcpserver' } })
+    await service.ctx.plugin(McpClientHost)
+    const host = service.ctx.get('mcpClientHost')!
+    const kept = { identity: 'browsermcp', roots: ['/var/lib/mumbo/uploads'] }
+    expect(McpClient.Config(input)).toMatchObject(kept)
+    const validated = host.validate(input, ['servers', 'ident'])
+    expect(validated).toMatchObject(kept)
+    await createTransport(validated, service.ctx).start()
+    expect(service.specs).toEqual([expect.objectContaining({ identity: 'browsermcp', cwd: '/home/browsermcp' })])
+    // The schema rows themselves: without `roots` an entry that offers none has no list to read, and without `identity`
+    // a value that names no identity passes unchecked.
+    const { roots: _offered, ...rootless } = input
+    expect(host.validate(rootless, ['servers', 'ident'])).toMatchObject({ identity: 'browsermcp', roots: [] })
+    expect(() => host.validate({ ...input, identity: '' }, ['servers', 'ident'])).toThrow('servers.ident.identity expected string length >= 1')
+  })
+
+  it('refuses, through the host under a run-as provider, a server with no identity it can run as, before anything starts', async () => {
+    // What dsh mounts when it runs as root in a box, here naming no server identity.
+    const service = await fakeService({ childIdentity: { uid: 1001, gid: 1001, groups: [] } })
+    await service.ctx.plugin(SessionProjectionRegistry)
+    await service.ctx.plugin(SystemPrompt)
+    await service.ctx.plugin(ToolRuntime)
+    await service.ctx.plugin(McpClientHost)
+    const host = service.ctx.get('mcpClientHost')!
+    const { identity: _named, ...unnamed } = input
+    const anonymousServer = host.mount(host.validate({ ...unnamed, failOnStartupError: true }, ['servers', 'ident']))
+    await expect(anonymousServer.ready).rejects.toMatchObject({ cause: { message: expect.stringContaining('names no serverIdentity') as string } })
+    await anonymousServer.dispose()
+    const unlisted = host.mount(host.validate({ ...input, identity: 'nobody' }, ['servers', 'ident']))
+    await expect(unlisted.ready).rejects.toThrow('mcp-client(ident): subprocess: this provider configures no identity "nobody", so no server can start as it')
+    await unlisted.dispose()
+    expect(service.specs).toEqual([])
+  })
+})
 
 function observe(transport: ReturnType<typeof createTransport>) {
   const messages: JSONRPCMessage[] = []

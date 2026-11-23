@@ -12,7 +12,8 @@ import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import OfficeKit, { OfficeSourceKey, type OfficeKitSource } from '../src/index.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import OfficeKit, { type OfficeSourceKey, type OfficeKitSource } from '../src/index.ts'
 import { ChildConverter, HELPER_START_ALLOWANCE_MS, helperDeadlineMs, type HelperConverterOptions } from '../src/convert-child.ts'
 
 const posix = process.platform === 'win32' ? describe.skip : describe
@@ -201,7 +202,7 @@ it('bounds a helper run at the Kit deadline plus the fixed start allowance', () 
 
 async function fixture(name: string, bytes?: Buffer): Promise<OfficeKitSource> {
   const content = bytes ?? await readFile(new URL(`./fixtures/${name}`, import.meta.url))
-  return { key: OfficeSourceKey(name), version: 'v1', bytes: content.length,
+  return { key: brandString<OfficeSourceKey>(name), version: 'v1', bytes: content.length,
     read: async () => ({ bytes: Uint8Array.from(content), version: 'v1' }) }
 }
 

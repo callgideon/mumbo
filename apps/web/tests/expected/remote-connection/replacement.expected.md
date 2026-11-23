@@ -1,0 +1,9 @@
+- region "Custom remote connection":
+  - heading "Custom remote connection" [level=2]
+  - code: {{access-address}}
+  - status: "Invitation state: pending"
+  - status "Invitation ID": {{invitation-id}}
+  - button "Create invitation"
+  - button "Cancel invitation"
+  - button "Reload"
+  - button "Close settings"

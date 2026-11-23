@@ -1,0 +1,126 @@
+- 'img "Change request state: Needs attention"'
+- text: "Add the pull request panel #7"
+- 'button "Commits shown: All commits"': All commits
+- button "Submit review"
+- button "Open in browser"
+- radiogroup "Review layer":
+  - radio "All 6" [checked]
+  - radio "Interface 1"
+  - radio "Implementation 2"
+  - radio "Tests 3"
+- button "All 6 files"
+- switch "Hide test files"
+- button "Filter lens": Lens
+- button "Notes 2" [pressed]
+- progressbar "Viewed files": 0 / 6 viewed
+- text: +8 −2
+- button "Refresh changes"
+- button "Collapse all files"
+- button "Side by side" [pressed]
+- button "Line wrap" [pressed]
+- button "Move file tree to the right" [expanded]
+- region "All 6 files":
+  - button "Collapse panel.md" [expanded]
+  - text: docs/panel.md New file +2 −0
+  - checkbox "Mark panel.md as viewed"
+  - button "More actions for panel.md"
+  - strong: Note
+  - text: Looked at this file
+  - button "Remove"
+  - button "Select line R1": "1"
+  - text: "+ # Panel"
+  - button "Select line R2": "2"
+  - text: + Shows the change requests of a Session.
+  - button "Collapse schema.json" [expanded]
+  - text: docs/schema.json New file +1 −0
+  - checkbox "Mark schema.json as viewed"
+  - button "More actions for schema.json"
+  - button "Select line R1": "1"
+  - text: "+ { \"type\": \"object\" }"
+  - button "Collapse zh.json" [expanded]
+  - text: locale/zh.json New file +1 −0
+  - checkbox "Mark zh.json as viewed"
+  - button "More actions for zh.json"
+  - button "Select line R1": "1"
+  - text: "+ { \"title\": \"Panel\" }"
+  - button "Collapse panel.spec.ts" [expanded]
+  - text: src/panel.spec.ts New file +1 −0
+  - checkbox "Mark panel.spec.ts as viewed"
+  - button "More actions for panel.spec.ts"
+  - button "Select line R1": "1"
+  - text: "+ it('shows the panel', () => {})"
+  - button "Collapse panel.ts" [expanded]
+  - text: src/panel.ts +2 −2
+  - checkbox "Mark panel.ts as viewed"
+  - button "More actions for panel.ts"
+  - button "Select line L1": "1"
+  - text: export const n1 = 1
+  - button "Select line R1": "1"
+  - text: export const n1 = 1
+  - button "Select line L2": "2"
+  - text: export const n2 = 2
+  - button "Select line R2": "2"
+  - text: export const n2 = 'two'
+  - strong: Note
+  - text: Check the quoted value
+  - button "Remove"
+  - button "Select line L3": "3"
+  - text: export const n3 = 3
+  - button "Select line R3": "3"
+  - text: export const n3 = 3
+  - button "Select line L4": "4"
+  - text: export const n4 = 4
+  - button "Select line R4": "4"
+  - text: export const n4 = 4
+  - button "Select line L5": "5"
+  - text: export const n5 = 5
+  - button "Select line R5": "5"
+  - text: export const n5 = 5
+  - button "6 unchanged lines"
+  - button "Select line L12": "12"
+  - text: export const n12 = 12
+  - button "Select line R12": "12"
+  - text: export const n12 = 12
+  - button "Select line L13": "13"
+  - text: export const n13 = 13
+  - button "Select line R13": "13"
+  - text: export const n13 = 13
+  - button "Select line L14": "14"
+  - text: export const n14 = 14
+  - button "Select line R14": "14"
+  - text: export const n14 = 14
+  - button "Select line L15": "15"
+  - text: export const n15 = 15
+  - button "Select line R15": "15"
+  - text: export const n15 = 'fifteen'
+  - button "Select line L16": "16"
+  - text: export const n16 = 16
+  - button "Select line R16": "16"
+  - text: export const n16 = 16
+  - button "Select line L17": "17"
+  - text: export const n17 = 17
+  - button "Select line R17": "17"
+  - text: export const n17 = 17
+  - button "Select line L18": "18"
+  - text: export const n18 = 18
+  - button "Select line R18": "18"
+  - text: export const n18 = 18
+  - button "Remaining unchanged lines"
+  - button "Collapse package.json" [expanded]
+  - text: package.json New file +1 −0
+  - checkbox "Mark package.json as viewed"
+  - button "More actions for package.json"
+  - button "Select line R1": "1"
+  - text: "+ { \"name\": \"demo\" }"
+- separator "Resize file tree"
+- navigation "All 6 files":
+  - textbox "Filter files…"
+  - button "docs" [expanded]
+  - button "docs/panel.md": panel.md +2 −0
+  - button "docs/schema.json": schema.json +1 −0
+  - button "locale" [expanded]
+  - button "locale/zh.json": zh.json +1 −0
+  - button "src" [expanded]
+  - button "src/panel.spec.ts": panel.spec.ts +1 −0
+  - button "src/panel.ts": panel.ts +2 −2
+  - button "package.json": package.json +1 −0

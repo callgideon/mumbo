@@ -3,7 +3,7 @@
   - navigation:
     - button "Allgemein"
     - button "Modelle"
-    - button "Integrierte Plugins"
+    - button "Plugins"
     - button "Agentenvoreinstellungen"
   - button "Konfigurationsdatei öffnen"
   - button "Schließen"

@@ -14,7 +14,5 @@ export function provideWorkingDirectoryFixture(ctx: Context, defaultDirectory = 
     defaultDirectory,
     get,
     ensure: (agent: Agent): Promise<string> => Promise.resolve(get(agent.session)),
-    // Every Session stays in its original project, which the person chose.
-    chooser: (): 'host' => 'host',
   })
 }

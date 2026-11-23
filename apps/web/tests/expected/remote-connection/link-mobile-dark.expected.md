@@ -1,0 +1,15 @@
+- region "Remote connection":
+  - heading "Remote connection" [level=2]
+  - paragraph: Use the methods below to sign in to DeepSeek Harness on another device.
+  - region "Access address":
+    - heading "Access address" [level=3]
+    - code: {{access-address}}?token={{login-token}}
+    - button "Copy link"
+    - paragraph: Keep this login link private
+    - paragraph: This link contains sign-in credentials; anyone who can reach this address can use it to sign in. Send it only to your own devices; do not share it publicly. Restarting the server invalidates the link.
+  - region "QR code login":
+    - heading "QR code login" [level=3]
+    - button "Create QR code"
+  - region "Pairing requests":
+    - heading "Pairing requests" [level=3]
+    - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.

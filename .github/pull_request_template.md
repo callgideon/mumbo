@@ -6,6 +6,8 @@
 
 ## Changes
 
+<!-- Three items: Interface changes, Behavior changes, Module responsibilities and dependencies; write None for an item that has none. -->
+
 ## Testing
 
 <!-- Test design -->

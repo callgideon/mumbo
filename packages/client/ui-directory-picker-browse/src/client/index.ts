@@ -1,6 +1,6 @@
 /**
  * Browser half of the browse directory-picker backend: fills ui-workspace's
- * two directory-flow holes with the in-app Select Workspace Directory dialog
+ * three directory-flow holes with the in-app Select Workspace Directory dialog
  * (figma `Harness` 813-23126 family), driving the node half's
  * `directoryPicker/list`/`directoryPicker/createDirectory` primitives.
  * Mounting this package therefore composes both sides of the browse
@@ -26,9 +26,9 @@ export const inject = ['slots', 'uiWorkspace', 'locale', 'remoteAccess']
 
 /**
  * Client plugin body: register the dialog's dictionaries and, while the
- * current Peer may list Host directories, the browse flow into both
+ * current Peer may list Host directories, the browse flow into all three
  * directory-flow holes through `slots.inject()` because the ui-workspace
- * entries may activate later or replace their declarations.
+ * declarations may activate later or be replaced.
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
@@ -158,17 +158,21 @@ export function apply(ctx: ClientContext): void {
     createDirectory: (path, name) => ctx.uiWorkspace.createDirectory(path, name),
     t: ctx.locale.bind(LOCALE_NS),
   })
-  // Both declaration lifetimes must be live before the pair installs; the
-  // generator makes the two registrations one transactional effect. The
-  // outer/inner nesting order is arbitrary; neither hole has precedence.
+  // Every declaration lifetime must be live before the set installs; the
+  // generator makes the three registrations one transactional effect. The
+  // nesting order is arbitrary; no hole has precedence.
   ctx.remoteAccess.whenAccess('directoryPicker/list', () =>
     ctx.slots.inject('conversation.hero.workspace.directoryFlow', () =>
-      ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
-        yield ctx.slots.register({
-          name: 'conversation.hero.workspace.directoryFlow', inject: injected,
-        }, BrowseDirectoryFlow)
-        yield ctx.slots.register({
-          name: 'sidebar.workspaces.directoryFlow', inject: injected,
-        }, BrowseDirectoryFlow)
-      })))
+      ctx.slots.inject('sidebar.workspaces.directoryFlow', () =>
+        ctx.slots.inject('workspace.picker.directoryFlow', function* () {
+          yield ctx.slots.register({
+            name: 'conversation.hero.workspace.directoryFlow', inject: injected,
+          }, BrowseDirectoryFlow)
+          yield ctx.slots.register({
+            name: 'sidebar.workspaces.directoryFlow', inject: injected,
+          }, BrowseDirectoryFlow)
+          yield ctx.slots.register({
+            name: 'workspace.picker.directoryFlow', inject: injected,
+          }, BrowseDirectoryFlow)
+        }))))
 }

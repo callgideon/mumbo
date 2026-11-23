@@ -918,6 +918,8 @@ export interface StoredEntry {
   locale?: string | undefined
   /** Diagnostics label of who registered. */
   registrant?: string | undefined
+  /** Package name of the Loader entry that registered, absent outside a Loader entry. */
+  module?: string | undefined
 }
 
 /**
@@ -954,6 +956,7 @@ interface ErasedOptions {
    * against the per-declaration InjectParams tuples. */
   inject?: ((...args: any) => Record<string, unknown>) | undefined
   registrant?: string | undefined
+  module?: string | undefined
 }
 
 /** Register options the core interprets; every other field of a list registration is one of its slot-declared fields. */
@@ -1368,6 +1371,7 @@ export class SlotCore {
       ...(options.store !== undefined ? { store: options.store } : {}),
       ...(options.locale !== undefined ? { locale: options.locale } : {}),
       ...(options.registrant !== undefined ? { registrant: options.registrant } : {}),
+      ...(options.module !== undefined ? { module: options.module } : {}),
     }
     const next = [...rec.entries, entry]
     // Stable sorts: priority ascending for every kind, ties keep registration

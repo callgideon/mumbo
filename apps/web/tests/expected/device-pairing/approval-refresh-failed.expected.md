@@ -1,0 +1,5 @@
+- region "Pairing requests":
+  - heading "Pairing requests" [level=3]
+  - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.
+  - alert: Could not load requests. Retry to refresh the list.
+  - button "Retry"

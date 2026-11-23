@@ -1,21 +1,22 @@
-- text: feat Project directory
-- button "Copy project directory path"
-- button "Local changes"
-- text: HEAD → origin/main
-- 'button "View the changes of this Session: 4 files, 4 lines added, 1 lines deleted"': +4 −1 4 files
-- heading "Change requests of this Session · 1" [level=3]
-- button "Refresh status"
-- list:
-  - listitem:
-    - 'img "Change request state: Needs attention"'
-    - link "Add the pull request panel":
-      - /url: https://github.com/octo/demo/pull/7
-    - text: "#7 feat → main"
-    - button "Open in browser"
-    - button "Copy change request link"
-    - 'button "Remove #7 from this Session"'
-    - 'button "Collapse #7" [expanded]'
-    - button "Checks 1 checks loaded; more available"
-    - button "Review Review required"
-    - text: Merge No conflicts
-    - 'button "View the changes of #7: 128 lines added, 14 lines deleted"': Changes +128 −14 1 unresolved threads
+- complementary "Session panel":
+  - region "Environment":
+    - heading "Environment" [level=2]
+    - text: workspace {{cwd}} feat Project directory
+    - button "Local changes · 4 files, 4 lines added, 1 lines deleted": Local changes · 4 files
+    - text: +4 −1
+    - button "Local changes actions"
+  - region "Change requests":
+    - heading "Change requests" [level=2]
+    - text: "1"
+    - list:
+      - listitem:
+        - 'button "Change request state: Needs attention Add the pull request panel"':
+          - 'img "Change request state: Needs attention"'
+          - text: Add the pull request panel
+        - text: "#7"
+        - 'button "Actions for #7"'
+        - 'button "Collapse #7" [expanded]'
+        - button "Checks 1 checks loaded; more available"
+        - button "Review Review required"
+        - text: Merge No conflicts
+        - 'button "View the changes of #7: 128 lines added, 14 lines deleted"': Changes +128 −14 1 unresolved threads

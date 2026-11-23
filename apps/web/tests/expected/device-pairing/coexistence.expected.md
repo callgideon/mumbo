@@ -1,0 +1,27 @@
+- region "Remote connection":
+  - heading "Remote connection" [level=2]
+  - paragraph: Use the methods below to sign in to DeepSeek Harness on another device.
+  - region "Access address":
+    - heading "Access address" [level=3]
+    - code: {{access-address}}?token={{login-token}}
+    - button "Copy link"
+  - region "QR code login":
+    - heading "QR code login" [level=3]
+    - button "Regenerate"
+    - button "Cancel"
+    - img "One-time login QR code"
+    - paragraph:
+      - timer: Expires in {{seconds}}s
+    - paragraph: Keep this code private
+    - paragraph: Anyone with this code can sign in until it is used or expires. Keep it private.
+    - paragraph: HTTP sends login credentials without encryption. Use only on a trusted network.
+  - region "Pairing requests":
+    - heading "Pairing requests" [level=3]
+    - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.
+    - note:
+      - paragraph: Approval gives that browser full access to this app, including approving other devices.
+    - text: Pairing code
+    - code: {{pairing-code}}
+    - paragraph: Source IP 127.0.0.1
+    - button "Approve"
+    - button "Deny"

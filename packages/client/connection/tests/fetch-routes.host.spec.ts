@@ -1,9 +1,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { PeerScope, Principal } from '@deepseek-ai/dsh-typert-protocol'
 import { describe, expect, it, vi } from 'vitest'
-import type { BrowserAuth } from '../src/browser-auth.ts'
 import type { ConnectionFetchAccessRequest, ConnectionFetchRoute } from '../src/rpc.ts'
 import { HostConnectionService } from '../src/rpc-host.ts'
+import { ConnectionAuthentication } from '../src/authentication.ts'
 
 async function mounted(): Promise<{
   readonly connection: HostConnectionService
@@ -11,7 +11,7 @@ async function mounted(): Promise<{
 }> {
   const ctx = new Context()
   const fiber = ctx.plugin((pluginCtx) => {
-    new HostConnectionService(pluginCtx, [], {} as BrowserAuth)
+    new ConnectionAuthentication(pluginCtx); new HostConnectionService(pluginCtx, [])
   })
   await fiber.await()
   return {
@@ -229,7 +229,7 @@ describe('Connection exact Fetch route access', () => {
 
   it('logs a throwing authorizer and refuses the request', async () => {
     const ctx = new Context()
-    const fiber = ctx.plugin((pluginCtx) => { new HostConnectionService(pluginCtx, [], {} as BrowserAuth) })
+    const fiber = ctx.plugin((pluginCtx) => { new ConnectionAuthentication(pluginCtx); new HostConnectionService(pluginCtx, []) })
     await fiber.await()
     const connection = ctx.get('connection') as HostConnectionService
     const warn = vi.spyOn(ctx.logger, 'warn').mockImplementation(() => {})
@@ -274,7 +274,7 @@ describe('Connection exact Fetch route access', () => {
 
   it('installs one authorizer at a time and removes it with its registering fiber', async () => {
     const ctx = new Context()
-    const provider = ctx.plugin((pluginCtx) => { new HostConnectionService(pluginCtx, [], {} as BrowserAuth) })
+    const provider = ctx.plugin((pluginCtx) => { new ConnectionAuthentication(pluginCtx); new HostConnectionService(pluginCtx, []) })
     await provider.await()
     const connection = ctx.get('connection') as HostConnectionService
     connection.fetch.register({
@@ -324,7 +324,7 @@ describe('Connection in-process Peers', () => {
 
   it('disposes a created Peer with the plugin that read the Connection', async () => {
     const ctx = new Context()
-    const provider = ctx.plugin((pluginCtx) => { new HostConnectionService(pluginCtx, [], {} as BrowserAuth) })
+    const provider = ctx.plugin((pluginCtx) => { new ConnectionAuthentication(pluginCtx); new HostConnectionService(pluginCtx, []) })
     await provider.await()
     let created: PeerScope | undefined
     const consumer = ctx.plugin({

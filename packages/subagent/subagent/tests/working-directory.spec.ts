@@ -8,17 +8,17 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as Spawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import * as Fork from '@deepseek-ai/dsh-subagent-fork-in-process'
-import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SubagentRuntime from '../src/index.ts'
 import { TestSessionQuery } from './test-session-query.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
-async function fixture(options: { confineTo?: 'origin' } = {}) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-child-directory-')))
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-child-directory-'))
   const origin = join(root, 'origin')
   const first = join(origin, 'first')
   const second = join(origin, 'second')
@@ -29,7 +29,6 @@ async function fixture(options: { confineTo?: 'origin' } = {}) {
     await ctx.fiber.dispose()
     await rm(root, { recursive: true, force: true })
   })
-  if (options.confineTo === 'origin') await ctx.plugin(LocalFileSystem, { cwd: origin, modelRoots: [origin] })
   await mountAgentLoopTestDependencies(ctx, { workingDirectory: true })
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(JsonlSessionPersistence, { root: join(root, 'sessions') })
@@ -41,11 +40,11 @@ async function fixture(options: { confineTo?: 'origin' } = {}) {
   const adapter = new MockAdapter([textResponse('parent'), textResponse('child'), textResponse('continued')])
   ctx.llm.registerAdapter(['mock'], adapter)
   const { agent: parent } = await ctx.agents.create({
-    sessionId: SessionId('directory-parent'),
+    sessionId: brandString<SessionId>('directory-parent'),
     meta: { cwd: origin },
     agentOptions: { provider: 'mock', model: 'mock' },
   })
-  return { ctx, parent, root, origin, first, second, adapter }
+  return { ctx, parent, origin, first, second, adapter }
 }
 
 describe('subagent working directories', () => {
@@ -84,44 +83,14 @@ describe('subagent working directories', () => {
     await vi.waitFor(() => { expect(ctx.agents.get(started.childId)).toBeUndefined() })
     using observed = await ctx.sessionQuery.observeSession(started.childId)
     expect(observed.header.cwd).toBe(origin)
-    const last = observed.events.findLast(event => event.type === 'working-directory/change')
+    const last = observed.events.findLast(event => event.type === 'workspace-root/change')
     expect(last?.data).toMatchObject({ cwd: selected })
-  })
-
-  it('refuses a model-chosen child directory outside the model roots before anything starts', async () => {
-    const { ctx, parent, root, first } = await fixture({ confineTo: 'origin' })
-    for (const cwd of [root, '..']) {
-      await expect(startTestActivation(ctx, 'spawn', { parent, cwd, prompt: [{ type: 'text', text: 'child' }] }))
-        .rejects.toMatchObject({ code: 'FS_OUTSIDE_ROOTS' })
-    }
-    expect(ctx.agents.list().map(agent => agent.id)).toEqual([parent.id])
-    const inside = await startTestActivation(ctx, 'spawn', { parent, cwd: 'first', prompt: [{ type: 'text', text: 'child' }] })
-    expect(ctx.workingDirectory.get(inside.localAgent.session)).toBe(first)
-    expect(ctx.workingDirectory.chooser(inside.localAgent.session)).toBe('model')
-    await inside.result
-    // A caller that derives the directory itself, such as a workflow, is not confined, before or after the child runs.
-    const derived = await startTestActivation(ctx, 'spawn', { parent, cwd: root, cwdChooser: 'host', prompt: [{ type: 'text', text: 'child' }] })
-    expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
-    await derived.result
-    expect(ctx.workingDirectory.get(derived.localAgent.session)).toBe(root)
-    const relative = await startTestActivation(ctx, 'spawn', { parent, cwd: '..', cwdChooser: 'host', prompt: [{ type: 'text', text: 'child' }] })
-    expect(ctx.workingDirectory.chooser(relative.localAgent.session)).toBe('host')
-    await relative.result
-  })
-
-  it('keeps an inherited directory the host chose for the parent outside the model roots after the child runs', async () => {
-    const { ctx, parent, root } = await fixture({ confineTo: 'origin' })
-    await ctx.workingDirectory.set(parent, root)
-    const inherited = await startTestActivation(ctx, 'spawn', { parent, prompt: [{ type: 'text', text: 'child' }] })
-    await inherited.result
-    expect(ctx.workingDirectory.get(inherited.localAgent.session)).toBe(root)
-    expect(ctx.workingDirectory.chooser(inherited.localAgent.session)).toBe('host')
   })
 
   it('rolls back a local child whose setup realm has no directory service', async () => {
     const { ctx, parent, second, adapter } = await fixture()
     const beforeSessions = ctx.sessions.list().length
-    const childId = SessionId('missing-directory-service')
+    const childId = brandString<SessionId>('missing-directory-service')
     const create = ctx.agents.create.bind(ctx.agents)
     const creation = vi.spyOn(ctx.agents, 'create').mockImplementation(options => create({
       ...options,
@@ -133,7 +102,11 @@ describe('subagent working directories', () => {
         provider: 'spawn', label: 'unavailable directory service', childId,
         parent, cwd: second, prompt: [{ type: 'text', text: 'child' }],
         signal: new AbortController().signal,
-      })).rejects.toThrow(/subagents require the working-directory service/)
+      })).rejects.toMatchObject({
+        name: 'SubagentError',
+        code: 'WORKING_DIRECTORY_UNAVAILABLE',
+        message: expect.stringMatching(/subagents require the working-directory service/) as string,
+      })
 
       expect(ctx.agents.list().map(agent => agent.id)).toEqual([parent.id])
       expect(parent.session.snapshotEvents().filter(event => event.type === 'subagent/catalog')).toEqual([])

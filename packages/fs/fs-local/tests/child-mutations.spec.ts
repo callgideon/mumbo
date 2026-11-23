@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import { FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FsError, type FsVersion } from '@deepseek-ai/dsh-fs'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
@@ -213,12 +214,12 @@ describe('change helper protocol', () => {
 
   it('decodes only well-formed outcomes of the requested kind', () => {
     const write = { operation: 'update', version: 'v', before: null, after: 'a' }
-    expect(decodeOutput('write', JSON.stringify({ ok: true, value: write }))).toEqual({ ...write, version: FsVersion('v') })
+    expect(decodeOutput('write', JSON.stringify({ ok: true, value: write }))).toEqual({ ...write, version: brandString<FsVersion>('v') })
     expect(decodeOutput('edit', JSON.stringify({ ok: true, value: { version: 'v', before: 'a', after: 'b' } }))).toMatchObject({ after: 'b' })
     expect(decodeOutput('delete', JSON.stringify({ ok: true, value: { before: null } }))).toEqual({ before: null })
     expect(decodeOutput('mkdir', JSON.stringify({ ok: true, value: null }))).toBeNull()
     const moved = { sourceBefore: 'a', destination: write, sourceDeleted: false, sourceFailure: { code: 'FS_IO_ERROR', message: 'kept' } }
-    expect(decodeOutput('move', JSON.stringify({ ok: true, value: moved }))).toMatchObject({ destination: { version: FsVersion('v') }, sourceDeleted: false })
+    expect(decodeOutput('move', JSON.stringify({ ok: true, value: moved }))).toMatchObject({ destination: { version: brandString<FsVersion>('v') }, sourceDeleted: false })
     expect(decodeOutput('move', JSON.stringify({ ok: true, value: { ...moved, sourceDeleted: true } }))).toMatchObject({ sourceDeleted: true })
     const malformed = new FsError('the file change helper returned a malformed result; the change may or may not have been applied', 'FS_IO_ERROR')
     for (const [op, text] of [

@@ -9,7 +9,8 @@
 import { extname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { PatchHunk } from '@deepseek-ai/dsh-fs-patch'
-import { FS_ERROR_CODES, FsError, FsVersion } from '@deepseek-ai/dsh-fs'
+import { FS_ERROR_CODES, FsError, type FsVersion } from '@deepseek-ai/dsh-fs'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import type {
   FileSystem,
   FsDeleteOutcome,
@@ -151,7 +152,7 @@ export function decodeOutput<K extends MutationRequest['op']>(op: K, text: strin
 function brandVersions(value: unknown): unknown {
   if (!isRecord(value)) return value
   const copy: Record<string, unknown> = { ...value }
-  if (isString(copy.version)) copy.version = FsVersion(copy.version)
+  if (isString(copy.version)) copy.version = brandString<FsVersion>(copy.version)
   if (isRecord(copy.destination)) copy.destination = brandVersions(copy.destination)
   return copy
 }

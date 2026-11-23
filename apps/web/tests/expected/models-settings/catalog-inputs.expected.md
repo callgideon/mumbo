@@ -3,8 +3,9 @@
   - navigation:
     - button "General"
     - button "Models"
-    - button "Built-in plugins"
+    - button "Plugins"
     - button "Agent presets"
+    - button "Remote connection"
   - button "Open configuration file"
   - button "Close"
   - heading "Models" [level=2]
@@ -61,6 +62,10 @@
             - text: Text
             - checkbox "Image" [checked]
             - text: Image
+          - group "Reasoning levels 1":
+            - text: Reasoning levels
+            - button "About reasoning levels": "?"
+            - switch "Reasoning levels 1"
           - button "Add model"
       - button "Cancel"
       - button "Apply"

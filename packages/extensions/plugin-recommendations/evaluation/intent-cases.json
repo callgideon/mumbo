@@ -1,0 +1,126 @@
+[
+  {
+    "id": "cot_original",
+    "prompt": "I want the model's thinking to be in Chinese It is sometimes English right now",
+    "expected": "Look up the catalog, offer exactly one matching cot-translation-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "cot_paraphrase",
+    "prompt": "Reading the expanded English reasoning is a bit of a strain; can I read it in Chinese directly?",
+    "expected": "Look up the catalog, offer exactly one matching cot-translation-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "badge",
+    "prompt": "I hope that whenever I ask you to create PR you always include powered by dsh the badge.",
+    "expected": "Look up the catalog, offer exactly one matching badge-skill-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "voice",
+    "prompt": "I want to in DSH by speaking directly, to enter long requirements without typing everything.",
+    "expected": "Look up the catalog, offer exactly one matching voice-input-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "titles",
+    "prompt": "A session's topic drifts as we chat, but the title stays the first sentence; I want it to follow the conversation content.",
+    "expected": "Look up the catalog, offer exactly one matching session-titles-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "search",
+    "prompt": "I want you to help me recover a plan discussed in earlier sessions of this workspace; is there a ready-made feature?",
+    "expected": "Look up the catalog, offer exactly one matching session-search card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "terminal",
+    "prompt": "I want the terminal you open to be reused across tool calls, keeping its shell state, and still be able to type into the same interactive program.",
+    "expected": "Look up the catalog, offer exactly one matching terminal-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "worktree",
+    "prompt": "I want, in DSH , for you to open a separate branch and working directory to continue with new changes while the current changes stay in place.",
+    "expected": "Look up the catalog, offer exactly one matching tool-worktree card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "team",
+    "prompt": "I want multiple agents to divide work, communicate, and coordinate progress on a shared task board.",
+    "expected": "Look up the catalog, offer exactly one matching agent-team-profile card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "auto_review",
+    "prompt": "DSH Confirming every tool call interrupts my train of thought; can the model first decide whether to allow it based on my authorization?",
+    "expected": "Look up the catalog, offer exactly one matching auto-review card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "ralph",
+    "prompt": "I want to iterate in a loop around one goal, with each round handed to a fresh agent with a clean context.",
+    "expected": "Look up the catalog, offer exactly one matching ralph-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "inspector",
+    "prompt": "I want to in DSH to inspect raw session events and message groups in the UI and troubleshoot message display problems.",
+    "expected": "Look up the catalog, offer exactly one matching inspector-profile card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "market",
+    "prompt": "I have an index of a third-party plugin market and want to add it to DSH to browse and install its plugins directly.",
+    "expected": "Look up the catalog, offer exactly one matching plugin-market-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "cua",
+    "prompt": "I want you to be able, on my Mac , to view and click the desktop app's UI and fill in forms, DSH is there a ready-made feature?",
+    "expected": "Look up the catalog, offer exactly one matching cua-bundle card, explain its actual scope, and do not enable or edit files before the user acts."
+  },
+  {
+    "id": "translation_once",
+    "prompt": "Translate this sentence into Chinese: Let me check the failing test first.",
+    "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
+  },
+  {
+    "id": "ordinary_question",
+    "prompt": "Explain in two sentences the difference between Git merge and rebase .",
+    "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
+  },
+  {
+    "id": "one_off",
+    "prompt": "Write me a short sentence celebrating finishing work today.",
+    "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
+  },
+  {
+    "id": "vague",
+    "prompt": "I want this interface to be easier to use.",
+    "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
+  },
+  {
+    "id": "decline",
+    "prompt": "I want thinking content shown in Chinese, but only discuss it for now; do not recommend plugins or change configuration.",
+    "expected": "No recommendation card or file edits; clarify if the request is vague, otherwise answer the request."
+  },
+  {
+    "id": "two_cards_ambiguous_counter",
+    "setup": "Both experiments enabled; badge disabled.",
+    "prompt": "I need every PR 's DSH badge, plus a right-sidebar counter. Please give two entry points: one card for an existing plugin, one card to create one, but do not execute yet.",
+    "expected": "Exactly one badge proposal, no second card block. Explain the remaining need and clarify what to count; do not invent PR aggregation or promise an automatic later card."
+  },
+  {
+    "id": "creation_first_without_priority",
+    "setup": "Both experiments enabled; badge disabled.",
+    "prompt": "I want a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session. I also want every PR all have DSH badge. Give me entry points for both, and do not execute yet.",
+    "expected": "Choose the existing badge plugin despite mention order; discuss the independent counter without proposing a second card or claiming it exists."
+  },
+  {
+    "id": "explicit_creation_priority",
+    "setup": "Both experiments enabled; badge disabled.",
+    "prompt": "I want every PR all have DSH badge, and also a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session. This round, give the counter's creation entry point first and only explain the badge for now; do not execute.",
+    "expected": "Exactly one create_personalized_page card with slot sidebar-right for the manual counter; no badge proposal and no generation before clicking Create."
+  },
+  {
+    "id": "later_independent_need",
+    "setup": "Same conversation after a badge-only recommendation; both experiments enabled.",
+    "prompt": "Now give the counter plan: a manual mini achievement counter on the right of the current session that can add one, reset to zero, and save per session; do not create it yet.",
+    "expected": "One creation card in the new turn, not suppressed by the earlier card or requiring badge activation; preserve manual counting and per-Session data."
+  },
+  {
+    "id": "two_existing_plugins",
+    "prompt": "I find the expanded English thinking a strain to read, and I also want every PR all have DSH badge. Give recommendation entry points for both ready-made plugins, and do not enable yet.",
+    "expected": "Select one eligible plugin for the single card block, explain the other need, no second block or claim that both cards exist."
+  }
+]

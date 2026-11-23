@@ -3,7 +3,8 @@ import { PassThrough } from 'node:stream'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import ComputerUseRegistry from '@deepseek-ai/dsh-computer-use'
-import { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/brand'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/types'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -161,7 +162,7 @@ describe('provider lifecycle', () => {
   })
 
   it('rejects a second computer-use provider', async () => {
-    const release = ctx.computerUse.register(ComputerUseProviderName('another'))
+    const release = ctx.computerUse.register(brandString<ComputerUseProviderName>('another'))
     await expect(ctx.plugin(X11Provider, { display: ':1' })).rejects.toThrow('already registered')
     await release()
   })

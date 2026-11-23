@@ -17,6 +17,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 
 /** English dictionary (the key-set source of truth). */
 export const en = {
+  'menu.addToChat': 'Add to chat',
+  'menu.addToChatFailed': 'Couldn’t add file. Return to the chat and try again.',
   'section.files': 'Files & folders',
   'section.subagents': 'Subagents',
   'section.sessions': 'Sessions',
@@ -36,6 +38,8 @@ export const en = {
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {
+  'menu.addToChat': 'チャットに追加',
+  'menu.addToChatFailed': 'ファイルを追加できませんでした。チャットに戻って再試行してください。',
   'section.files': 'ファイルとフォルダ',
   'section.subagents': 'サブエージェント',
   'section.sessions': 'セッション',
@@ -55,6 +59,8 @@ export const ja = {
 
 /** Spanish dictionary, checked against the English keys. */
 export const es = {
+  'menu.addToChat': 'Añadir al chat',
+  'menu.addToChatFailed': 'No se pudo añadir el archivo. Vuelve al chat e inténtalo de nuevo.',
   'section.files': 'Archivos y carpetas',
   'section.subagents': 'Subagentes',
   'section.sessions': 'Sesiones',
@@ -74,6 +80,8 @@ export const es = {
 
 /** French dictionary, checked against the English keys. */
 export const fr = {
+  'menu.addToChat': 'Ajouter au chat',
+  'menu.addToChatFailed': 'Impossible d’ajouter le fichier. Revenez au chat et réessayez.',
   'section.files': 'Fichiers et dossiers',
   'section.subagents': 'Sous-agents',
   'section.sessions': 'Séances',
@@ -93,6 +101,8 @@ export const fr = {
 
 /** German dictionary, checked against the English keys. */
 export const de = {
+  'menu.addToChat': 'Zum Chat hinzufügen',
+  'menu.addToChatFailed': 'Datei konnte nicht hinzugefügt werden. Kehren Sie zum Chat zurück und versuchen Sie es erneut.',
   'section.files': 'Dateien und Ordner',
   'section.subagents': 'Subagenten',
   'section.sessions': 'Sitzungen',
@@ -112,6 +122,8 @@ export const de = {
 
 /** Russian dictionary, checked against the English keys. */
 export const ru = {
+  'menu.addToChat': 'Добавить в чат',
+  'menu.addToChatFailed': 'Не удалось добавить файл. Вернитесь в чат и повторите попытку.',
   'section.files': 'Файлы и папки',
   'section.subagents': 'Субагенты',
   'section.sessions': 'Сессии',
@@ -131,6 +143,8 @@ export const ru = {
 
 /** Portuguese dictionary, checked against the English keys. */
 export const pt = {
+  'menu.addToChat': 'Adicionar ao chat',
+  'menu.addToChatFailed': 'Não foi possível adicionar o arquivo. Volte ao chat e tente novamente.',
   'section.files': 'Arquivos e pastas',
   'section.subagents': 'Subagentes',
   'section.sessions': 'Sessões',
