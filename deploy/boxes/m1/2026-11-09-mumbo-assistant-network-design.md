@@ -1534,6 +1534,59 @@ The cache's worst case is a subscription that dies silently: copies are served f
     5. Refusal: as root, put a copy of the .pptx at `/root/probe.pptx`, then ask the model to render it. It's refused as outside the directories it can access. Delete the probe.
     6. On bitlane, one member turn renders a slide, which shows that fonts load on a project box. If the engine reports no usable fonts, the template adds fonts in a follow-up.
     7. bitlane's `dsh.log` gains no line per conversion.
+- **B55, the upstream sync to 0.2.3-alpha.2** [2026-11-23; the founder approved the merge through mumbo]: upstream `4b399c39a6` into main `a3edaa5799`, on `sync/upstream-20261123`. Merge commit only, as B51. The merge base is `e8f7b93a34`. A trial merge had 1,056 conflicting paths; 728 are Chinese docs and removed workflows that stay deleted.
+  - **Ruling, Office:** upstream folded the four Office skills into one, `office`, and gave the tools typed errors. Neither overlaps B54 in meaning, so both land whole.
+    - Skill: upstream's. The three format skills go; our only edits there were English-only.
+    - tool-office: upstream's file with one fork change kept, `readableInput` resolving through `resolveModelPath`. A path outside the roots still fails with `read`'s own error.
+    - office-kit: ours (the helper, its routing, group-readable outputs) plus upstream's refactors. The uid 0 rule of B54 is unchanged.
+    - The presets and the `skill-office` row equal upstream's. B54's rollout step 1 reads "the model loads the `office` skill".
+  - **Ruling, Session format:** no migration, and boxes stay on JSONL.
+    - `SQLITE_SESSION_FORMAT_VERSION = 4` and `SCHEMA_VERSION = 1` belong to a new opt-in package, `dsh-session-persistence-sqlite`. No shipped profile mounts it. `SESSION_FORMAT_VERSION` is 4 on both sides and the JSONL generation format didn't change.
+    - The SQLite provider is forbidden on boxes. Its import is one-way: later events live only in SQLite, and backups don't cover `<root>/.segments/sessions.sqlite`. Moving to it is its own design item.
+    - **Rollback is by backup only.** Upstream adds two required-on-read events without a version bump, `workspace-root/change` and `action-cards/decision`. The previous image refuses a Session log that holds either, and `ensure` writes the first one for any Session whose header has no directory. So a box that ran the new image goes back by being recreated from the previous template and restored from its pre-upgrade backup. Work after the upgrade is lost.
+    - mumbo keeps each box's pre-upgrade backup, image prod-a3edaa5799 and templates 09976c81 and 5e9c07fc until the rollout is signed off. Order: throwaway, the founder's box, a go or roll-back decision, then bitlane.
+    - Our persistence records are re-chained after upstream's seven new ones. No upstream record is edited.
+  - **Ruling, working directory:** upstream's model. Only Host operations move a Session's directory, recorded as `workspace-root/change`. The model's `working_directory` tool and the subagent tools' `cwd` are gone, and readers ignore stored `working-directory/change`.
+    - B24's `chooser` told a model-chosen directory from a Host-chosen one. With no model-chosen directory it has nothing to do, and its behaviour goes. The optional field stays in the deprecated event's declaration, because boxes' stored logs carry it.
+    - Kept in `ensure`: a missing original project is recreated empty and earlier Sessions are told once, and a directory the model swapped for a link out of the roots recovers to the original project.
+    - **Seen by the person:** a Session in which the model had changed directory, and a subagent child started with a `cwd`, resume in their original project.
+    - `tool-session-control` (`session_send_message`) stays off and is forbidden on boxes. It applies no Workspace restriction, so a member's turn could write into any Session.
+    - Every remaining caller that passes a directory to a subagent start or `workingDirectory.set` is listed in the PR with where the value comes from. A value the model can influence resolves through `resolveModelPath`.
+  - **Ruling, sandbox and run-as:** our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.
+    - Boxes run `danger-full-access` and rely on run-as and the fs roots, so "the write boundary follows the workspace root" bounds nothing there. The roots never read the workspace root.
+    - box-containment passes unchanged in meaning. It loses entries for packages that no longer exist (the working-directory tool, Python PTC) and gains the classifications below. Any other change to an assertion is named in the PR.
+  - **Ruling, who a request comes from:** upstream built the seam we had forked. edge-member becomes an authentication Provider (`ctx.connection.authentication.register`), and our `authenticators` registry and `admitIndex` go. WebServer admits each route by its declared policy and hands the handler the Peer.
+    - Upstream's `required` admits any Peer, members included. So two fork guards are re-applied on upstream's structure: dedicated RPC channels are owner-only, and an exact Fetch route refuses a non-owner unless the route's `access` and the Gateway's `remoteAccess.decide` allow it.
+    - **A member header beats an owner cookie.** Upstream takes the first live Peer in registration order. A test through the real project composition pins that a request carrying both is admitted as the member. If registration order can't guarantee it, the question comes back here.
+    - Also pinned: the source policy applies to members, an expired or badly signed header gets 401, and the index a member receives is rendered for the member Peer.
+    - An unclassified route now defaults to `required`. The PR lists every route a fork package registers, with its policy. A route that checks its own credential (the door key) is `anonymous` plus that check. `anonymous` without its own check needs a ruling per route.
+    - No member role gains an action. Upstream's nine new actions and `remoteConnection/*` stay outside them.
+    - The edge still finds the launch token: Token's entry is printed as `dsh web: <url>?token=…`. A test asserts exactly one printed line holds `token=`.
+  - **Ruling, MCP client:** our diff there is B24's (stdio servers run as the configured identity, with roots). It is re-applied on upstream's structure. `identity` and `roots` must be in upstream's new `config.ts` schema, or validation drops them and a stdio server starts as root. A test fails when they're removed.
+  - **Ruling, rows new since the merge base:** off on a box unless listed as on. Off uses B51's switch, `disabled: !!js "process.getuid?.() === 0"` in our copy of the bundle file, so no edge change and no deploy order. Each off row is in FORBIDDEN with its reason.
+    - **On:** `deepseek-auth` (model routes need it; it contacts only the `DEEPSEEK_BASE_URL` origin), `authentication-token`, the new client-only rows, and action cards and plugin recommendations in whatever state their `experimental` predecessors had.
+    - **Off:**
+      - `remote-connection`: it adds anonymous `/` and `/pairing/*` routes and an owner-cookie Provider, a second way to become owner through the edge.
+      - `mcp-account`, `cli-account`, `ui-connector-account`: connector sign-in. Where its tokens live on a box isn't designed, and `cli-account` starts processes in root's home.
+      - `upstream-skills`: it downloads archives from GitHub and writes them as root when a connector registers. None is on.
+      - `creation-recommendations`: it starts a subagent with the `cordis` preset, and `tool-cordis` is forbidden.
+      - `tool-session-control`, above.
+    - Both box compositions load with no unresolved and no pending plugin. **[my call]**
+  - **DeepSeek contact:** no new deepseek.com host is on.
+    - Found while checking, older than this sync: `session-telemetry-otel` posts to `dsh-otel-collector.deepseeksvc.com`. Boxes turn it off with `DSH_TELEMETRY_DISABLED=1`, but the desktop overlay didn't, and the desktop-overlay test only looked for `deepseek.com`. The overlay turns the row off, the test covers `deepseeksvc.com`, and box-containment asserts the environment variable. No one ships the desktop build (B51), so nothing was sent.
+    - Web search no longer names `deepseek-search-api` in the base bundle; `dsh-web` picks a provider per model route. The PR states which provider and host a box uses on each of our two routes.
+  - **Other deleted-upstream files:** upstream's deletion is accepted for all of them. Every fork edit there was English-only, except a mock line for `admitIndex`. The English-only sweep is redone over the whole tree.
+  - **Node.js:** upstream requires `^24.22.3 || >=26.13.1` for undici's security fixes. `deploy/Dockerfile` pins `node:24.22.3-bookworm` instead of the floating `node:24-bookworm`, mumbo-ci matches, and each template's build smoke prints a version at or above it.
+  - **Process text:** upstream's AGENTS.md now prefers rebases. The fork keeps merge commits, no force-push and English only, which are the founder's rules.
+  - **Node AMI, apart from the sync** [2026-11-23]: the nodes' launch template read Ubuntu's "current" AMI from SSM, so each plan showed drift, and the next replacement node would have booted an untested build. The cell module now takes `node_ami` (us-east-1 `ami-08b275ac6cc5dbefb`, ap-south-1 `ami-09d8c1e69d114dbf7`), the SSM lookup is gone, and a plan shows no changes (boxes/production 5ea463d253). A newer AMI goes through the RUNBOOK's node blue/green, one node first. **[my call]**
+  - **Rollout check (mumbo), in addition to B51's and B54's:**
+    1. Each template's build smoke prints "app clean 2" and `node --version` at 24.22.3 or newer.
+    2. Per box, before the upgrade: the backup restores, and the Session count is noted.
+    3. Per box, after: the same Sessions are listed, and an existing Session opens with its history and takes one turn.
+    4. `find /root/.dsh -name sessions.sqlite` prints nothing.
+    5. The log has no line about a refused or unreadable Session, 0 unresolved plugins, and the K2 reconcile line.
+    6. On bitlane: the member checks of B49c pass, a member is refused `/pairing/` and a dedicated owner channel, and each refusal writes its `remote-access/denied` line.
+    7. One web search works on the founder's box.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
