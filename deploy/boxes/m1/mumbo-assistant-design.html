@@ -571,7 +571,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:.5px sol
 </tr>
 <tr>
 <td><strong>RW3</strong> the record</td>
-<td>The root-owned index, the &quot;What ran without asking&quot; view, the header chip, and <code>needs_you</code>'s &quot;decided for you&quot;. A GIF.<br><strong>[2026-11-12, design ruling]</strong><br>- B48's gate logs its Run Wild refusals as <code>runwild/decision</code> kind <code>refusal</code>.<br>- The index is one append-only JSONL file per UTC day.<br>- The digest line is the view's &quot;Yesterday&quot; row until M4's digest, which reads the same counts.<br>- The chip's menu opens the view, or switches to Full access in one click without the Full access risk confirmation: leaving Run Wild removes authority, and the click sends nothing unless the Session is still in Run Wild.<br>- The push moves to RW3b<br>- <strong>[2026-11-12, build review]</strong> The menu re-reads the mode just before it sends. A switch made elsewhere in the milliseconds between the re-read and the send can still be overwritten. Closing that would need a conditional mode change on the Host, so it is a known limitation. The view doesn't claim each action is also in its Session, because the record and the log can differ</td>
+<td>The root-owned index, the &quot;What ran without asking&quot; view, the header chip, and <code>needs_you</code>'s &quot;decided for you&quot;. A GIF.<br><strong>[2026-11-12, design ruling]</strong><br>- B48's gate logs its Run Wild refusals as <code>runwild/decision</code> kind <code>refusal</code>.<br>- The index is one append-only JSONL file per UTC day.<br>- The digest line is the view's &quot;Yesterday&quot; row until M4's digest, which reads the same counts.<br>- The chip's menu opens the view, or switches to Full access in one click without the Full access risk confirmation: leaving Run Wild removes authority, and the click sends nothing unless the Session is still in Run Wild.<br>- The push moves to RW3b<br>- <strong>[2026-11-12, build review]</strong> The menu re-reads the mode just before it sends. A switch made elsewhere in the milliseconds between the re-read and the send can still be overwritten. Closing that would need a conditional mode change on the Host, so it is a known limitation. The view doesn't claim each action is also in its Session, because the record and the log can differ<br>- <strong>[2026-11-14, merge with rc.2]</strong> Upstream's new gate on plugin-entry exports refuses <code>clipSummary</code> on run-wild's entry. <code>@mumbo/mcp</code> now clips a refusal's arguments to 2,000 characters itself, and the record still clips every summary when it writes. The limit is written in both packages, and a test in each pins it, so the event and the record line stay the same. Approved. <span class="tag m">my call</span></td>
 <td>RW1</td>
 </tr>
 <tr>
@@ -716,7 +716,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:.5px sol
 <li>Scoping the environment per Executor. This would need a dsh harness change, because <code>dsh-shell-env</code> allows only <code>DSH_*</code> keys.</li>
 <li>The Outbox approval gate. It moves to part C, which designs it properly. Today its waiting path (<code>Later</code>) retries every 5 seconds forever and blocks everything queued behind it in the conversation, and a draft cannot be edited under the same id.</li>
 </ul>
-<p><strong>The project overlay needs no approval override.</strong> Superagent pins <code>danger-full-access</code>, under which bash asks only when a command requests a wider sandbox, and delegated children pin <code>never</code>. So <code>mumbo.overlay.yml</code>'s <code>approval: ask</code> never stops a worker. The project box itself is the confinement. <span class="tag m">my call</span></p>
+<p><strong>The project overlay sets approval <code>never</code>.</strong> <code>deploy/mumbo-project.overlay.yml</code> sets the approval row and all three of its permission presets to <code>never</code>, with no <code>defaultPreset</code>, so every Session on a project box starts Full access with approval <code>never</code> (since f81ba0d359, 2026-11-09). The reason is that nobody at a project box can answer an ask: no owner sits at its browser, and members hold no approval action. <code>never</code> refuses every ask at once, before anyone sees it. It doesn't approve it. Under Full access, bash asks only when a command requests a wider sandbox, so plain commands run unasked under <code>ask</code> and <code>never</code> alike, and <code>never</code> only turns would-be asks into refusals. Workers get the same. Superagent pins <code>danger-full-access</code>, and delegated children pin <code>never</code>. Members see no preset selector and can't run <code>/permission</code>. The project box and agent containment (§B24) are the confinement. <span class="tag m">my call, amended 2026-11-13: the earlier text said the overlay needed no override</span></p>
 <h2>7. Nodes</h2>
 <div class="tbl"><table>
 <thead>
@@ -866,6 +866,7 @@ th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:.5px sol
 <li>It takes its identity from config (<code>mumbo-bot[bot]</code> and the bot's numeric user id), not from <code>/user</code>.</li>
 <li>Commits use <code>&lt;bot id&gt;+mumbo-bot[bot]@users.noreply.github.com</code>.</li>
 <li>It doesn't poll notifications (App tokens can't). It polls the repository streams it already has (new issues, new PRs, comments, reviews) plus check runs.</li>
+<li>Its setup check reads the repository through the edge and doesn't consult <code>permissions.push</code>. GitHub reports <code>push: false</code> to an installation token even when it has <code>contents: write</code>. See B53.</li>
 <li>To keep strangers on a public repo from costing an Eval each, a comment becomes a Trigger only when at least one holds:
 <ul>
 <li>it is on a Thread a Ticket subscribes to;</li>
@@ -2397,6 +2398,257 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Tests: a member's first visit to a restored project box with no workspace record shows the project workspace, with no create call and no error.</li>
 </ul>
 </li>
+<li><strong>[2026-11-12, fix-point review]</strong>
+<ul>
+<li><strong>Cause, confirmed by a replay.</strong> Every person visiting a project box through the edge is a member, the founder included. The Gateway refused <code>initializeDefault</code> with <code>remote-access/denied</code> (<code>no-allow</code>) before the controller ran. The startup race is refuted: the edge serves no page before dsh's URL line, which comes after the restored stores load. The owner's later call created nothing because the registry skips the default once any Session exists.</li>
+<li><strong>The directory is <code>/root/projects</code>, not <code>/src</code>.</strong> <code>/src</code> is outside the model's file roots and isn't backed up, so a member's Session there has no usable file tools. <code>/root/projects</code> is a model root, is backed up, and is already where the coordinator keeps the project.</li>
+<li><strong>The step runs before dsh prints its URL line.</strong> It is a plugin row in the project overlay, so dsh holds the visit and the edge doesn't change. It re-creates the Workspace if the box-local owner deletes it.</li>
+<li><strong>Members hold the Workspace role on the project Workspace only.</strong> A configured box would otherwise open a member into superagent's directory. Superagent's Sessions stay readable under Ungrouped.</li>
+<li><strong>The member client never calls <code>initializeDefault</code>.</strong> It checks the grant with <code>whenAccess</code>. The Gateway logs each refused or failed call at warn, or at error for internal failures, with no arguments.</li>
+<li><strong>A member's existing Sessions stay reachable.</strong> Sessions started outside any Workspace (cwd <code>/src</code>) are listed and openable for members, so earlier project conversations don't vanish once they stop running. New member Sessions start in the project Workspace.</li>
+</ul>
+</li>
+<li><strong>[2026-11-12, build review, PR #56]</strong>
+<ul>
+<li>A re-create follows only the deletion of the project Workspace's own record. Reacting to any deletion looped on the registry's rollback delete.</li>
+<li>A Gateway failure line carries the message only when the Gateway wrote it. A handler's own error is logged by code, because handlers can build messages from arguments.</li>
+<li><code>session/create</code> stays in members' global role for now. The sidebar's New Session and the Desktop titlebar button show only while that grant holds, though every client create names a Workspace. Until <strong>B49b</strong> moves both buttons to the target Workspace's grant and drops the global one, a member's Workspace-less create over the API can name any directory, or gets <code>/src</code>.</li>
+</ul>
+</li>
+<li><strong>[2026-11-13, live]</strong> #56 and #58 run on bitlane (image prod-053b71af12). It has one Workspace at <code>/root/projects</code> holding the founder's new Session, and its first load logged no gateway failures.</li>
+</ul>
+</li>
+<li><strong>B50, the project box's Terminal tab for members</strong> [2026-11-13, found live on bitlane]:
+<ul>
+<li>A member got &quot;terminal/environment: access denied (no-allow)&quot;. The terminal endpoints run in a Session's execution environment, as <code>agent</code> (§B24), so a member's terminal on a Session they may prompt has the same power as that Session's shell. The terminal actions join the member Session role.</li>
+<li>The grant waits on one check: on a contained project box, a browser terminal must run as <code>agent</code> with no read of <code>/root/.dsh</code>. If it doesn't, members don't get the tab at all, rather than an error.</li>
+<li>The denial wasn't in dsh.log. The same change finds out why: a stream path that B49's logging misses, or the log level.</li>
+<li><strong>[2026-11-13, check passed]</strong> On bitlane the owner's terminal runs as <code>agent</code> (uid 1003, groups agent and workspace), with <code>HOME=/home/agent</code>, and <code>ls /root/.dsh</code> is denied. The containment row passes only <code>LANG</code>, <code>LC_ALL</code> and <code>TZ</code> through and lists <code>DEEPSEEK_API_KEY</code> and <code>MUMBO_MEMBER_KEY</code> as secrets, so the shell sees neither. A terminal spec has no identity field, so a caller can't pick another user.</li>
+<li><strong>Build review, PR #60 (B49c)</strong> [2026-11-13]: approved, head 77ee86cb88. The GIF shows a member, signed in through a loopback edge stand-in, opening New terminal in <code>projects</code> and running <code>pwd</code> and <code>echo</code>. A local run with the project overlays logged one warn line per refused call, the four refusals included a refused stream open, and a second turn added no lines. Rollout: as a member on bitlane, <code>id</code> in the Terminal tab gives <code>uid=1003(agent)</code>, and a refused call's <code>typert gateway: … remote-access/denied</code> line is in <code>/root/dsh.log</code>.
+<ul>
+<li><strong>Live [2026-11-14]:</strong> image prod-7baafa6519 on bitlane (box iqrovbg2ae0fjltlomceq). Both rollout checks pass. They called the API as a member, using a header signed on the box with its own member key; the GIF already covers the Terminal tab. A refused <code>terminal/environment</code> wrote its <code>[W] typert-gateway-service … remote-access/denied … (no-allow)</code> line to <code>/root/dsh.log</code>. A member terminal's shell runs as <code>uid=1003(agent)</code>, in groups <code>agent</code> and <code>workspace</code>, and <code>ls /root/.dsh</code> is denied.</li>
+<li>The eight <code>terminal/*</code> actions join <code>MEMBER_SESSION_ROLE</code>. Terminals are kept per Session, so a terminal id from a Session the member can't reach isn't found under a Session they can.</li>
+<li>The terminal ignores the Session's sandbox and approval. Its power is the <code>agent</code> user's, the same as a member's prompt in a Full access Session. So a confining preset for members would also need this grant narrowed. <span class="tag m">my call</span></li>
+<li>Terminals are shared per Session, and attaching takes the keyboard. Accepted for M1: members are trusted collaborators.</li>
+<li>Terminal input names no member and leaves no log line. Accepted for M1. Attribute terminal opens before a project box admits a member the owner hasn't vetted.</li>
+<li>A refusal reads &quot;You do not have access to terminals in this Session.&quot; in the page's language, never the Host's text.</li>
+</ul>
+</li>
+<li><strong>Why the denial wasn't logged:</strong> not the level. <code>dsh web</code> registers no logger exporter, so every Host <code>ctx.logger</code> line, errors included, stays in Cordis's in-memory buffer. #60 also logs a refused stream open (<code>session/follow</code>, <code>terminal/attach</code>), which before left no line even in that buffer.</li>
+<li><strong>Ruling, the sink:</strong> <code>deploy/mumbo-project.overlay.yml</code> gains a <code>@deepseek-ai/cordis-plugin-logger-console</code> row with <code>levels: { default: 1 }</code> (warn and error) and no colors, and the root package.json gains it as a dependency. Project boxes only: no owner call is ever refused, so a person box waits until an incident needs it. Not in the upstream web bundle, which would change every <code>dsh web</code> user's stdout. Before merge, a local run through one member turn and one refusal shows the lines it writes. If any plugin warns per turn, or a line quotes prompt text or a secret, that's reported, not filtered. <span class="tag m">my call</span>
+<ul>
+<li><strong>Live [2026-11-14]:</strong> on bitlane, from box start through one member turn, the log holds 5 warn lines and no errors. Four are the rollout check's own refusals, from <code>typert-gateway-service</code>. One is <code>local-subprocess-runtime</code>'s single warning that the process has weaker containment. The member turn added none. No line quotes prompt text, an email, file contents, a token or a key. The sink stays as ruled.</li>
+</ul>
+</li>
+<li><strong>Member approval, corrected [2026-11-13]:</strong> <code>never</code> refuses every ask at once; it doesn't approve it. Under Full access, plain commands run unasked either way, so on a project box <code>never</code> only turns would-be asks into refusals, and <code>ask</code> would leave a member's turn waiting, because no member can answer an approval. See the amended ruling at &quot;The project overlay sets approval <code>never</code>&quot;. Recommendation: keep it. The founder decides.</li>
+</ul>
+</li>
+<li><strong>B51, the upstream sync to 0.2.2-rc.2</strong> [2026-11-13, PR #61, head d1151b530e]: merge commit only, never squash or rebase, so the next sync keeps its merge base.
+<ul>
+<li><strong>Ruling, Office tools:</strong> upstream's <code>@deepseek-ai/dsh-tool-office</code> (<code>office_render</code>, <code>office_convert</code>, <code>office_recalculate</code>) is mounted on no box.
+<ul>
+<li>Its tools read files the model picks and parse them with LibreOffice Kit inside root dsh, the class of work §B24 moves to <code>agent</code>.</li>
+<li>It also writes outputs under <code>$DSH_HOME</code>, outside the model roots.</li>
+<li><strong>How [amended 2026-11-13]:</strong> the row is a child of the <code>standard</code> and <code>ptc</code> agent presets, and a Loader patch can't reach a preset's child. Turning it off from the edge would mean restating both presets whole, which pins them, overrides the person's own preset edits, and changes today's images. Instead, our copies of the two web-app preset files set that child to <code>disabled: !!js &quot;process.getuid?.() === 0&quot;</code>, with a comment that links the containment Agent Note (<code>.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md</code>). A box's dsh runs as root and a desktop's doesn't, so the tools are off exactly where they'd parse documents as root. The cost is a two-line divergence from upstream that a later sync shows as a conflict, not a silent drift. No edge change, no deploy order.</li>
+<li>box-containment's FORBIDDEN lists the package. A test pins it both ways: off when composed as uid 0, on otherwise.</li>
+<li>~~The Office skill text stays.~~ <strong>Amended [2026-11-14]: the Office skills are off on boxes too.</strong> All four skills (<code>office</code>, <code>office-docx</code>, <code>office-pptx</code>, <code>office-xlsx</code>) tell the model that the three tools &quot;appear next step&quot; once <code>office</code> is loaded. The format skills send legacy files and PDF output through <code>office_convert</code>, and the pptx skill makes an <code>office_render</code> after every slide edit part of the normal flow. Those tools only ever appear through tool-office, which is off on boxes, so the text promises something that never happens. And with rc.2's skills reminder, it is offered in every Session. Upstream's snapshot misses this because no task there needs a missing tool.
+<ul>
+<li><code>skill-office</code>'s row in our copy of the web-app <code>cordis.patch.yml</code> gets the same <code>disabled: !!js &quot;process.getuid?.() === 0&quot;</code>, with the same Agent Note comment. FORBIDDEN lists it. box-containment asserts it's off under uid 0, and desktop-overlay asserts it stays on for a non-root dsh. <code>office-kit</code> stays.</li>
+<li>Cost: boxes lose the python-docx, python-pptx and openpyxl guidance. The model still edits Office files with Python through bash, using its own knowledge.</li>
+<li>Not a box-only copy of the skill text: a copy pointed to by <code>assetRoot</code> goes stale without notice on every sync, while a <code>disabled</code> line shows up as a conflict.</li>
+<li>No recording before the change: removing text that promises missing tools needs no model round to justify it. If Office work on boxes turns out to need the guidance, the fix is the same revisit as the tools: run the converter as <code>agent</code>, then turn both back on. <span class="tag m">my call</span></li>
+<li><strong>Build review, PR #62 (B52)</strong> [2026-11-14]: approved at 2dbddb4a1d, pending CI. It changes one row plus tests, the web-app README and the Agent Note, and needs no GIF. Removing the switch makes 5 tests fail, across both boxes and the desktop's uid 0 case.</li>
+</ul>
+</li>
+<li><code>office-kit</code> stays: it renders previews the person opens, as <code>office-to-pdf</code> did.</li>
+<li>Revisit when the converter can run as <code>agent</code> through the subprocess provider and write into the model roots. <span class="tag m">my call</span> <strong>Done by B54 [2026-11-14]:</strong> the converter runs as <code>agent</code>. Outputs go to a read-only root rather than the model roots.</li>
+</ul>
+</li>
+<li><strong>The account package's hosts:</strong> upstream folded <code>account-controller</code> into <code>deepseek-account</code>, which now also reads notifications from <code>harness.deepseek.com</code>. Boxes keep the row off. The desktop overlay points <code>harnessOrigin</code> at <code>api.mumbo.si</code>, whose gateway serves an empty notification list. A desktop-overlay test fails if any enabled desktop row names a deepseek.com host other than <code>api.deepseek.com</code>. Deploy order: the gateway goes out before the next desktop build. Approved.
+<ul>
+<li><strong>Amended [2026-11-14]: the gateway stays retired.</strong> Nothing hosts <code>deploy/gateway.mjs</code>. The shared server was retired on 2026-11-09, and <code>api.mumbo.si</code> redirects to <code>app.mumbo.si</code>, as section 17a says. So today's desktop app can't sign in to Mumbo or reach the model through it, with or without #61, and no one ships or uses that build. N2a replaces that path: the app signs in through the edge and uses the person's box, which reaches the model as any box does. The gateway won't come back as its own service, which would mean new spend for no one, and it won't move onto the edge. N2a deletes <code>deploy/gateway.mjs</code> and the desktop overlay's <code>api.mumbo.si</code> origins. Until then they stay as they are, unused, and the deploy-order note above has nothing to do. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>Search:</strong> upstream's new person-facing Workspace search resolves the root <code>unconfined</code>, as the person's listing does since §B24. Members hold no search action. Approved.</li>
+<li><strong>CI and CodeQL [2026-11-13]:</strong>
+<ul>
+<li>Static and unit pass on Node 24 at 6058b21698. mumbo-ci runs no session snapshots, so the two ptc snapshots were checked against main locally. ptc-persistent passes. ptc-script-imports fails the same way on main under Node 22, and boxes run <code>node:24-bookworm</code>.</li>
+<li>CodeQL counts 17 alerts in touched files. Most exist on main. The critical one at <code>deploy/gateway.mjs:79</code> is a false positive: the host is a constant, and the path must start with <code>/anthropic/</code>.</li>
+<li>One alert is new in shipped upstream code: a quadratic regex on model-written diff fence headers in <code>ui-primitives</code>, which a crafted fence could use to hang the person's tab. It gets a one-line fork fix (<code>split('\t', 1)</code>) with a test. <span class="tag m">my call</span></li>
+<li>Dismissing the rest is the founder's call. main has no branch protection, so CodeQL doesn't block the merge, and the dismissals are cleanup. At a5e0283c13 [2026-11-14], CI passes and #78 is fixed. Of the 16 alerts, the founder dismisses one as a false positive (#58, the gateway) and 11 as &quot;used in tests&quot;. Four are upstream code already open on main: #17, #19, #35 and #36. They are &quot;won't fix&quot; or stay open.</li>
+</ul>
+</li>
+<li><strong>Merge-in of #60 [2026-11-14]:</strong> head 1eec077169 merges main 7baafa6519 (#60) into the branch. It brings #60's 26 files in unchanged.
+<ul>
+<li>The one conflict, <code>ui-sidebar-terminal</code> locales, keeps upstream's agent and sandbox badge keys and #60's <code>accessDenied</code> in every dictionary.</li>
+<li>The Gateway's stream-open logging, the <code>logger-console</code> row and its classification, and the Office switch with its FORBIDDEN entry all survive the merge.</li>
+<li>It includes the comment fix and the diff-fence fix with its 50,000-tab test. Upstream's regex fails that test at 8.3 s.</li>
+<li>Approved, pending CI on this head and the CodeQL triage in the PR body.</li>
+<li><strong>A test that expired with the date [2026-11-14]:</strong> a5e0283c13 fixes an upstream liveshare test that main also has. Its &quot;live&quot; owner credential was fixed at 2026-10-15 plus 30 days, so it expired at midnight on 2026-11-14 against the host's clock. It is now 30 days from the test's start. Until #61 lands, main's unit job fails on whichever shard runs that file, so #61 merges before any other PR. Approved.</li>
+</ul>
+</li>
+<li><strong>The founder's overlay:</strong> <code>deploy/mumbo.overlay.yml</code> turned off <code>account-controller</code>, a row that no longer exists. The founder approved deleting those two lines, and f937651317 removes only them. <code>deepseek-account</code> stays off.</li>
+</ul>
+</li>
+<li><strong>B53, App mode's GitHub setup check</strong> [2026-11-14, found live on bitlane]: saving bitlane's GitHub Source (<code>callgideon/bitlane</code>, cli <code>gh</code>) was refused with <code>repositoryReadOnly</code> for <code>mumbo-bot[bot]</code>.
+<ul>
+<li>The App is set up correctly. The installation (170921050, all repositories) grants <code>contents: write</code>, <code>pull_requests: write</code> and <code>issues: write</code>. The edge mints the project's token with those permissions, and a permission GitHub hadn't approved would answer 503. <code>gh</code> on dsh's PATH resolves to the box's wrapper (<code>/usr/local/lib/mumbo/bin/gh</code>), and the read of the private repository through it succeeded. GitHub's answer reports <code>admin</code>, <code>maintain</code>, <code>pull</code>, <code>push</code> and <code>triage</code> all <code>false</code>.</li>
+<li>The check is wrong. <code>superagent/src/deployment.ts</code> refuses App mode when <code>permissions.push</code> is <code>false</code>, on the belief that an installation token doesn't report <code>permissions</code>. GitHub does report them, all <code>false</code>, so no App-mode project could ever pass setup.</li>
+<li><strong>Ruling:</strong> in App mode the check reads the repository through the edge and doesn't consult <code>permissions</code>. The edge enforces what a worker can do. It refuses repositories the project hasn't bound and permissions the installation hasn't approved, and both still fail the read. The renamed-repository check stays. User-account mode is unchanged. <code>deployment.spec.ts</code> expects App mode with <code>push: false</code> to resolve. The doc comment, the README and <code>UPSTREAM.md</code> record the change.</li>
+<li>Not a write probe (<code>git push --dry-run</code> or a test ref): it needs a local repository and adds a GitHub write to setup, and the edge already enforces writes. An archived repository fails at the first push, visibly. <span class="tag m">my call</span></li>
+<li>Rollout: after deploy, mumbo saves the Source again on bitlane, and the card shows the repository.</li>
+<li><strong>Build review, PR #63</strong> [2026-11-14]: approved at a962347152, pending CI. The condition is now <code>!githubApp &amp;&amp; access.push !== true</code>. App mode resolves with push <code>false</code>, <code>true</code> or <code>null</code>, and a 404 from the edge is still <code>repositoryUnreadable</code>. User-account mode still refuses <code>false</code> and <code>null</code>. Putting the old condition back fails the App-mode test.</li>
+</ul>
+</li>
+<li><strong>B54, Office on boxes, contained</strong> [2026-11-14; the founder asked through mumbo: &quot;making presentation / spreadsheets would be a good use-case&quot;]: <code>office_render</code>, <code>office_convert</code>, <code>office_recalculate</code> and the four Office skills come back on person and project boxes, with LibreOffice running as <code>agent</code>. B51's and #62's off switches stay until this ships, and this PR removes them.
+<ul>
+<li><strong>What runs as root today:</strong> on Linux the Kit (<code>@deepseek-ai/libreoffice-kit</code> 0.2.3) has no native engine. Each operation runs LibreOffice, compiled to WASM, in a Node worker thread inside root dsh.
+<ul>
+<li>A thread can't change its uid, so the engine must move into its own process.</li>
+<li>The Kit's own CLI (<code>dsoffice</code>) isn't the way. It takes file paths, so root would have to read output files in a directory <code>agent</code> controls. It also lacks office-kit's limits and font options.</li>
+</ul>
+</li>
+<li><strong>Ruling, the engine:</strong> office-kit gains a one-shot conversion helper, <code>@deepseek-ai/dsh-office-kit/convert-helper</code>. It's a subpath export, started the same way as fs-local's mutation helper, and runs the Kit in its own process.
+<ul>
+<li><strong>When the helper runs:</strong>
+<ul>
+<li>office-kit starts it through <code>ctx.subprocess.spawn</code> whenever the provider has a <code>childIdentity</code>. So on boxes it runs as <code>agent</code>, under the same bootstrap, environment and secret guard as the model's shell.</li>
+<li>Without a child identity, the in-process Worker stays, so the desktop and SDK are unchanged.</li>
+<li>While dsh runs as root, an operation runs only through a provider with a <code>childIdentity</code>. With no provider, or with one that has no child identity, every operation fails <code>unavailable</code>. None runs in-process as root. <span class="tag m">my call, review of #64, 2026-11-14</span></li>
+</ul>
+</li>
+<li><strong>Where it plugs in:</strong> the helper sits behind the Kit's <code>Converter</code> interface. office-kit's queue, cache, admission limits, scratch directory and output reads stay as they are. The parent sends the source bytes to the helper and writes what comes back into its own root-only scratch directory, so root never opens a path <code>agent</code> can write.</li>
+<li><strong>Protocol:</strong>
+<ul>
+<li>It runs over raw pipes (<code>stdin: 'pipe'</code>, <code>stdout: 'pipe'</code>), not collected text, which would decode the binary output as UTF-8 and keep only the tail of anything over its cap.</li>
+<li>The parent writes one JSON header (the operation, its parameters and the resolved converter options), then the source bytes, length-prefixed.</li>
+<li>The helper converts in a private <code>0700</code> directory under its own <code>TMPDIR</code> (<code>/home/agent/tmp</code>). It answers with one JSON header, then length-prefixed outputs: the PDF, the converted file, or each PNG with its page, sheet and range.</li>
+</ul>
+</li>
+<li><strong>Helper output is untrusted, as with fs-local:</strong>
+<ul>
+<li>The parent decodes the header strictly.</li>
+<li>It refuses a frame longer than <code>maxOutputBytes</code> (for renders, the image budget) and more images than the request allows. It stops reading at the cap and terminates the helper.</li>
+<li>A malformed answer is <code>invalid-output</code>.</li>
+<li>Kit failure codes cross as codes. The helper's text reaches only the tool result.</li>
+</ul>
+</li>
+<li><strong>No helper text reaches <code>ctx.logger</code>.</strong> On project boxes the warn sink writes to <code>/root/dsh.log</code>, and the edge parses the launch-token line in that file. A helper that put a forged line into its error message would forge the log. office-kit logs only its own fixed text and the failure code.</li>
+<li><strong>Deadline:</strong>
+<ul>
+<li>The Kit's own <code>timeoutMs</code> runs inside the helper.</li>
+<li>The parent bounds the helper's whole run at <code>timeoutMs</code> plus a fixed 30 s start allowance. On expiry it terminates the helper and rejects with <code>timeout</code>. <code>agent</code>'s shell can stop its own processes, and a stopped helper must not hold a conversion slot forever.</li>
+<li>Cancellation passes the caller's signal to <code>spawn</code>, which terminates the helper. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>Font metadata:</strong> the Kit's disk cache follows the helper's <code>HOME</code>, to <code>/home/agent/.cache/libreoffice-kit</code>. The model can change that cache, which affects only conversions that run as <code>agent</code>.</li>
+<li><strong>Cost:</strong>
+<ul>
+<li>One Node start per operation, about 0.3 s from source. Every operation already pays for a fresh WASM engine start.</li>
+<li>Outputs of up to 100 MiB through a pipe.</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><strong>Ruling, which files the tools open:</strong> the same files <code>read</code> opens.
+<ul>
+<li>tool-office resolves its input through <code>ctx.fs.resolveModelPath</code>, not <code>resolve</code>. That means model roots plus read-only roots, with pinned reads and the hard-link rule.</li>
+<li>Today it uses <code>resolve</code>. With the tools on, the model could therefore render or convert any Office-named file root can read, including ones under <code>/root/.mumbo</code>.</li>
+<li>The rule isn't &quot;only files whose mode lets <code>agent</code> read them&quot;. The model can already read every file in the roots with <code>read</code> and write those bytes wherever it may, so a stricter check adds no protection. Root also has no call that asks the kernel what <code>agent</code> could open. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>Ruling, outputs:</strong> converted and recalculated files go to <code>/var/lib/mumbo/office-outputs</code> (<code>root:agent</code>, <code>2750</code>), which <code>fs</code> lists in <code>readOnlyRoots</code>.
+<ul>
+<li>office-kit's output store gains <code>groupReadable</code>, as the attachment and spill stores have it: directories <code>0750</code>, which take the parent's group, and files <code>0640</code>.</li>
+<li><code>agent</code> can read and copy the files, as the skills' &quot;copy with the shell&quot; step needs, and <code>read</code> opens them.</li>
+<li>Only root writes there, so no link can be planted. <code>mcpserver</code>, <code>browsermcp</code> and <code>desktop</code> can read none of it.</li>
+<li><strong>Not chosen:</strong>
+<ul>
+<li>World-readable <code>0755</code>/<code>0644</code>: other users would read the person's documents.</li>
+<li>The helper writing outputs into the model roots: retention and Session cleanup would then delete files as <code>agent</code>, in directories the model controls, for no gain. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li>The directory stays outside backups. Outputs live 24 hours.</li>
+</ul>
+</li>
+<li><strong>Ruling, previews:</strong> the person's document previews go through the helper too, because they share office-kit. So a preview of a document the model wrote no longer parses as root, a risk B51 had accepted.
+<ul>
+<li>Residual: while a preview converts, its bytes pass through an <code>agent</code> process and its scratch file.
+<ul>
+<li>For a file in the model roots or the attachment store, that changes nothing: <code>agent</code> can read it anyway.</li>
+<li>A person who previews an Office file in a Session directory outside the roots exposes it to <code>agent</code> for that moment. Boxes create every project under the roots. Accepted. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li>The model can change what a preview shows, by stopping or replacing the helper. It could write that document itself anyway.</li>
+</ul>
+</li>
+<li><strong>Members on project boxes:</strong>
+<ul>
+<li>A member's turn uses the tools as any turn does, as <code>agent</code>, and <code>office_render</code>'s images appear in the transcript, which members can read.</li>
+<li>Members hold no action that reads file contents, only <code>workspaceFiles/list</code> and <code>workspaceFiles/changes</code>. So they don't get <code>officeKit/render</code> either: no Office previews for members, the same as for every other file. Revisit with member file reads. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>Python:</strong> boxes run the web profile, whose skills use <code>pythonEnvironment: user</code>. That means <code>python3</code> on <code>agent</code>'s PATH, plus <code>python3-venv</code> from the template.
+<ul>
+<li>The skill tells the model to check for python-docx, python-pptx and openpyxl, and to ask before installing any that are missing. Expect the first Office task to ask to install them in a venv under <code>/home/agent</code>.</li>
+<li>If the founder wants that step gone, a follow-up has the template preinstall them. <span class="tag m">my call</span></li>
+</ul>
+</li>
+<li><strong>Composition:</strong>
+<ul>
+<li>Remove B51's <code>disabled</code> lines from our copies of the <code>standard</code> and <code>ptc</code> preset files, and B52's from <code>skill-office</code>. The three rows then match upstream again.</li>
+<li><strong>box-containment:</strong>
+<ul>
+<li>Both packages leave FORBIDDEN.</li>
+<li>Classification: tool-office is model roots plus run-as, office-kit is run-as, and skill-office is none.</li>
+<li>On both boxes, the gate asserts that the <code>office-kit</code> row sets <code>outputDirectory: /var/lib/mumbo/office-outputs</code> and <code>groupReadable: true</code>, that <code>fs</code> lists that directory in <code>readOnlyRoots</code>, and that the box layout names it.</li>
+</ul>
+</li>
+<li>desktop-overlay: the tools and skills are on for uid 0 too.</li>
+<li><strong>The edge's containment rows</strong>, on both boxes: the <code>office-kit</code> row and the <code>readOnlyRoots</code> entry. <code>start.sh</code>'s <code>containmentLayout</code> creates the directory. <code>apps/cli/tests/fixtures/box-edge</code> mirrors them.</li>
+<li><strong>The containment Agent Note:</strong>
+<ul>
+<li>The spawn-path table gains Office conversions: run-as, previews included.</li>
+<li>The &quot;must be absent&quot; and &quot;revisit&quot; sentences go.</li>
+<li>The box layout list gains the directory.</li>
+</ul>
+</li>
+<li>The tool-office, office-kit and web-app READMEs and <code>UPSTREAM.md</code> record the fork changes.</li>
+</ul>
+</li>
+<li><strong>Tests:</strong>
+<ul>
+<li>The helper runs a real WASM conversion of a small .pptx and .xlsx as a child of the test process, through the local subprocess provider.</li>
+<li>A malformed or oversized answer from the helper is refused.</li>
+<li>A stopped helper runs into the parent's deadline.</li>
+<li>Routing picks the helper when the provider has a child identity and the Worker when it doesn't. Under uid 0, stubbed, it refuses both with no provider and with a provider that has no child identity.</li>
+<li>tool-office refuses a path outside the roots, and a link out of them, with <code>read</code>'s wording.</li>
+<li>With <code>groupReadable</code>, the output store writes <code>0750</code> directories and <code>0640</code> files.</li>
+<li>Reverting any one of the four changes (the helper, its routing, the input resolution, the output modes) fails a test.</li>
+</ul>
+</li>
+<li><strong>Snapshot and GIF:</strong> no client code changes, so no GIF. A box-composition session snapshot needs model rounds, so it waits on the key, as #59 does. The live rollout below is the evidence until then.</li>
+<li><strong>PRs and order:</strong> two PRs.
+<ol>
+<li>The harness PR to main: the helper, tool-office's input resolution, the output modes, the composition, the gate and the docs.</li>
+<li>The edge PR to <code>boxes/production</code>: the rows, the layout and <code>containment.test.mjs</code>.</li>
+</ol>
+<ul>
+<li>Deploy the image first. With the tools on and the old edge, the helper already runs as <code>agent</code>, because it follows <code>childIdentity</code>. Convert fails visibly there, since outputs stay in root's home.</li>
+<li>Then deploy the edge. Then repair the founder's box after a backup check, and then bitlane.</li>
+</ul>
+</li>
+<li><strong>Rollout check (mumbo):</strong>
+<ol>
+<li>On the founder's box, in a new Session, ask for a 3-slide .pptx and a small .xlsx with formulas. The model loads the Office skills and renders the slides.</li>
+<li>While a render or preview runs, <code>ps -eo uid,user,args | grep convert-helper</code> shows the helper as <code>agent</code>'s uid (1003 on bitlane). As <code>agent</code>, <code>ls /root/.dsh</code> is denied.</li>
+<li>Open both files in the document tab. Both previews render.</li>
+<li>Convert the .pptx to PDF. The tool's <code>file</code> is under <code>/var/lib/mumbo/office-outputs</code>, <code>root:agent</code>, mode <code>0640</code>, and the model's <code>cp</code> into the project works.</li>
+<li>Refusal: as root, put a copy of the .pptx at <code>/root/probe.pptx</code>, then ask the model to render it. It's refused as outside the directories it can access. Delete the probe.</li>
+<li>On bitlane, one member turn renders a slide, which shows that fonts load on a project box. If the engine reports no usable fonts, the template adds fonts in a follow-up.</li>
+<li>bitlane's <code>dsh.log</code> gains no line per conversion.</li>
+</ol>
+</li>
 </ul>
 </li>
 </ul>
@@ -2757,7 +3009,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <tbody>
 <tr>
 <td><strong>N2a</strong> app sign-in</td>
-<td>The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on <code>127.0.0.1</code> (<code>apps/desktop/README.md</code>), so this is a rework of the app. The sync replica's identity is registered here</td>
+<td>The desktop app signs in through the edge (Google in the system browser) and uses the person's box as its host instead of a local dsh. Today's app binds a local dsh on <code>127.0.0.1</code> (<code>apps/desktop/README.md</code>), so this is a rework of the app. The sync replica's identity is registered here. It deletes <code>deploy/gateway.mjs</code> and the desktop overlay's <code>api.mumbo.si</code> origins (B51)</td>
 <td>—</td>
 </tr>
 <tr>
@@ -2961,6 +3213,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Box and child sizes, after measuring.</li>
 <li>Test design per <code>docs/testing.md</code>; documentation and upgrade guides per the repository rules.</li>
 <li>Lower priority, for M6: which Sources bitlane, openinfrx and whiteboard need. whiteboard uses Scion and may need its own Source kind.</li>
+<li><strong>[2026-11-13]</strong> A project's repository is set in two places that don't fill each other in: the edge's project record (the approvals page's binding, which routes merge approvals) and the box's GitHub Source in the Superagent panel (what the coordinator works on). For M1 both are set by hand to the same repo, the binding first. At M6 the box's Source comes from the edge record.</li>
 </ul>
 <h3>Follow-ups after M1 (found in implementation review)</h3>
 <ul>
