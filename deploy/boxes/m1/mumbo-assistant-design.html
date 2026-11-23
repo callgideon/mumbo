@@ -2679,7 +2679,8 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Every remaining caller that passes a directory to a subagent start or <code>workingDirectory.set</code> is listed in the PR with where the value comes from.</li>
 <li><strong>Amended [2026-11-23]: the worktree tools and the forge panel are forbidden on boxes.</strong> They are the callers a model can influence: <code>enter_worktree</code>'s name, and a repository root read from git metadata the model can write. <code>set</code> resolves through <code>fs.resolve</code>, which lets a path outside the roots pass. The roots and run-as don't follow the Session's directory, but root dsh's own reads do: instruction and skill discovery, and file views.
 <ul>
-<li>With those off, no enabled box plugin calls <code>set</code>, so <code>set</code> itself doesn't change in this sync.</li>
+<li>With those off, one enabled box plugin still calls <code>set</code>: <code>subagent</code>, for a child's directory. The model-facing start tools pass none. The only caller that does is a workflow, which passes the parent's own checked directory, and a test fails if a workflow script gains a way to supply one. So <code>set</code> itself doesn't change in this sync.</li>
+<li>Our persistence record for <code>chooser</code> stays as written. The declared type didn't change, and upstream's <code>workspace-root/change</code> record already says readers ignore the old event.</li>
 <li>Before any plugin that calls <code>set</code> is allowed on a box, <code>set</code> resolves through <code>resolveModelPath</code> when the provider has model roots. Its own design item.</li>
 <li>Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and <code>set</code> is confined in this sync. <span class="tag m">my call</span></li>
 </ul>
