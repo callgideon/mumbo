@@ -35,7 +35,8 @@ const PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
  *  own program directories on PATH, after a project box's command shims and gh wrapper, are the B24 fix's prefix
  *  rulings of 2026-11-11, which the harness's fixtures (m1/b24-fix-loader) take on. agent's GH_CONFIG_DIR, after its
  *  npm prefix in both rows, is B48's token-location ruling of 2026-11-11, which the harness's fixtures (m1/b48-gate)
- *  take on. */
+ *  take on. The office-kit row and the Office outputs' read-only root are B54's ruling of 2026-11-14, which the
+ *  harness's fixtures (m1/b54-office-agent) take on. */
 const FIXTURE = (person, mcpGroups = '') => `- id: subprocess
   config:
     shellActivityDirectory: /run/dsh-shell
@@ -109,6 +110,7 @@ ${person ? `      browsermcp:
       - /usr/local/share/mumbo/agents/skills
       - /var/lib/mumbo/spill
       - /var/lib/mumbo/subprocess-spill
+      - /var/lib/mumbo/office-outputs
 - id: attachment-local
   config:
     dshHome: /var/lib/mumbo/attachments
@@ -116,6 +118,10 @@ ${person ? `      browsermcp:
 - id: spill-local
   config:
     root: /var/lib/mumbo/spill
+    groupReadable: true
+- id: office-kit
+  config:
+    outputDirectory: /var/lib/mumbo/office-outputs
     groupReadable: true
 - id: mcp-manager
   inject: [credentials, subprocess]
@@ -265,7 +271,7 @@ test('containment rows: the harness fixtures with the box\'s ids and agent in th
     // agent's gh sign-in (B48) is outside every root the file tools reach, so they refuse it; only the shell reads it.
     assert.ok(rows.includes('\n        GH_CONFIG_DIR: /var/lib/mumbo/agent-gh\n'))
     const roots = rows.slice(rows.indexOf('- id: fs-sandbox'), rows.indexOf('- id: attachment-local')).match(/\/[^\s,\]]+/g)
-    assert.equal(roots.length, 8)
+    assert.equal(roots.length, 9)
     for (const r of roots) assert.ok(!'/var/lib/mumbo/agent-gh/'.startsWith(`${r}/`) && !r.startsWith('/var/lib/mumbo/agent-gh'), r)
   }
   assert.throws(() => containmentLayout({ ...c, mcpServerWorkspace: 'all' }, true), /mcpServerWorkspace "all"/)
@@ -336,8 +342,9 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.deepEqual(['root', 'root/.cargo', 'root/.dsh', 'root/.mumbo', 'root/dsh.log', 'root/.dsh/tmp', 'root/.dsh/skills', 'run/dsh-shell', 'var/lib/mumbo', 'usr/local/share/mumbo/agents/skills'].map(p => [p, mode(p).toString(8)]),
       [['root', '711'], ['root/.cargo', '700'], ['root/.dsh', '700'], ['root/.mumbo', '700'], ['root/dsh.log', '600'], ['root/.dsh/tmp', '700'], ['root/.dsh/skills', '700'], ['run/dsh-shell', '711'], ['var/lib/mumbo', '755'], ['usr/local/share/mumbo/agents/skills', '755']])
     assert.equal(mode('outside'), 0o755, 'a link in /root is not followed')
-    for (const d of ['attachments', 'attachments/attachments', 'attachments/attachments/v1', 'spill', 'subprocess-spill']) assert.equal(mode(`var/lib/mumbo/${d}`), 0o2750, d)
+    for (const d of ['attachments', 'attachments/attachments', 'attachments/attachments/v1', 'spill', 'subprocess-spill', 'office-outputs']) assert.equal(mode(`var/lib/mumbo/${d}`), 0o2750, d)
     assert.ok(r.lines('install').includes('-d -o root -g agent -m 2750 T/var/lib/mumbo/attachments/attachments/v1'))
+    assert.ok(r.lines('install').includes('-d -o root -g agent -m 2750 T/var/lib/mumbo/office-outputs'))
     // agent's GH_CONFIG_DIR (B48): agent's alone.
     assert.ok(r.lines('install').includes('-d -o agent -g agent -m 0700 T/var/lib/mumbo/agent-gh'))
     assert.equal(mode('var/lib/mumbo/agent-gh'), 0o700)
@@ -373,6 +380,9 @@ test('the B24 layout: root\'s files kept from agent, every directory the rows na
     assert.equal(out.code, 0, out.err)
     assert.deepEqual(p.lines('setfacl'), ['--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/projects', '--set u::rwx,g::rwx,g:workspace-read:r-x,m::rwx,o::--- T/root/work'])
     assert.equal(statSync(p.at('var/lib/mumbo/superagent')).mode & 0o7777, 0o2750)
+    // The Office outputs (B54): root's, read by agent's group, as on a person box.
+    assert.ok(p.lines('install').includes('-d -o root -g agent -m 2750 T/var/lib/mumbo/office-outputs'))
+    assert.equal(statSync(p.at('var/lib/mumbo/office-outputs')).mode & 0o7777, 0o2750)
     assert.deepEqual([statSync(p.at('root/.config/gh')).mode & 0o777, statSync(p.at('root/github-proxy.log')).mode & 0o777], [0o700, 0o600])
     // The rows give agent the same GH_CONFIG_DIR on a project box, where its gh holds the wrapper's placeholder token.
     assert.ok(p.lines('install').includes('-d -o agent -g agent -m 0700 T/var/lib/mumbo/agent-gh'))
@@ -732,7 +742,8 @@ test('escape-test.sh parses under sh and runs every escape test the B24 brief na
     'start-sh-mode', 'agent-read-start-sh', 'agent-read-dsh-home', 'agent-read-dsh-log', 'agent-read-root-entries', 'agent-read-browser-home', 'agent-read-login-data', 'agent-read-cookies',
     'agent-proc-environ', 'agent-proc-cmdline', 'agent-proc-browser', 'mcpserver-proc-environ',
     // agent: what root runs or reads for it, and install paths
-    'agent-write-src', 'agent-write-plugin-paths', 'agent-write-mcp-home', 'agent-write-gh-wrapper', 'agent-write-superagent', 'agent-write-attachments', 'agent-write-spill', 'agent-write-agents-home',
+    'agent-write-src', 'agent-write-plugin-paths', 'agent-write-mcp-home', 'agent-write-gh-wrapper', 'agent-write-superagent', 'agent-write-attachments', 'agent-write-spill', 'agent-write-subprocess-spill',
+    'agent-write-office-outputs', 'agent-write-agents-home',
     // the display, computer use, uploads
     'agent-x-cookie', 'agent-x-display', 'xsession-login-data', 'computer-use-terminal', 'upload-outside-downloads',
     // consent's staged upload copies, and uploads through the real consent (the uploads contract of 2026-11-11)
