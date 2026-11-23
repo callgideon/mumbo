@@ -2682,9 +2682,19 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>With those off, one enabled box plugin still calls <code>set</code>: <code>subagent</code>, for a child's directory. The model-facing start tools pass none. The only caller that does is a workflow, which passes the parent's own checked directory, and a test fails if a workflow script gains a way to supply one. So <code>set</code> itself doesn't change in this sync.</li>
 <li>Our persistence record for <code>chooser</code> stays as written. The declared type didn't change, and upstream's <code>workspace-root/change</code> record already says readers ignore the old event.</li>
 <li>Before any plugin that calls <code>set</code> is allowed on a box, <code>set</code> resolves through <code>resolveModelPath</code> when the provider has model roots. Its own design item.</li>
-<li>Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and <code>set</code> is confined in this sync. <span class="tag m">my call</span></li>
+<li>~~Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and <code>set</code> is confined in this sync.~~ <span class="tag m">my call</span></li>
+<li><strong>Answered and ruled [2026-11-23]: the box's owner can, so the plugin manager gets a deny list.</strong> <code>pluginManager/setBundleEnabled</code> checks only manifest, platform and version, and the worktree, forge and DeepSeek chat-import bundles ship with the CLI. A model turn can't reach it, and no member role holds a plugin action. Traced from code, not run on a box.
+<ul>
+<li>plugin-manager gains one Config field of bundle ids that can't be enabled. The call refuses a listed id for every caller, the owner included. A profile that already has one enabled starts without mounting it and logs a warning.</li>
+<li>The list is set in our copy of the bundle file under the uid 0 condition, so it needs no edge change and is empty on the desktop. Today: <code>forge-bundle</code>, <code>tool-worktree</code>, <code>deepseek-chat-import</code>.</li>
+<li>box-containment composes every installed optional bundle and fails when one mounts a forbidden package and isn't listed.</li>
+<li>Chosen over confining <code>set</code>: it removes the callers, and it also covers chat-import, a DeepSeek contact, and bundles a later sync adds.</li>
+<li>Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box. Containment is about the model and members. <span class="tag m">my call</span></li>
 </ul>
 </li>
+</ul>
+</li>
+<li><code>tool-cordis</code>, which upstream added to the standard preset, and the ptc preset's <code>tool-plugin-manager</code>, which upstream turned on, are off under root by the same switch.</li>
 </ul>
 </li>
 <li><strong>Ruling, sandbox and run-as:</strong> our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.

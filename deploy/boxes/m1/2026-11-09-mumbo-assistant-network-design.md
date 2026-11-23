@@ -1556,7 +1556,14 @@ The cache's worst case is a subscription that dies silently: copies are served f
       - With those off, one enabled box plugin still calls `set`: `subagent`, for a child's directory. The model-facing start tools pass none. The only caller that does is a workflow, which passes the parent's own checked directory, and a test fails if a workflow script gains a way to supply one. So `set` itself doesn't change in this sync.
       - Our persistence record for `chooser` stays as written. The declared type didn't change, and upstream's `workspace-root/change` record already says readers ignore the old event.
       - Before any plugin that calls `set` is allowed on a box, `set` resolves through `resolveModelPath` when the provider has model roots. Its own design item.
-      - Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and `set` is confined in this sync. **[my call]**
+      - ~~Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and `set` is confined in this sync.~~ **[my call]**
+      - **Answered and ruled [2026-11-23]: the box's owner can, so the plugin manager gets a deny list.** `pluginManager/setBundleEnabled` checks only manifest, platform and version, and the worktree, forge and DeepSeek chat-import bundles ship with the CLI. A model turn can't reach it, and no member role holds a plugin action. Traced from code, not run on a box.
+        - plugin-manager gains one Config field of bundle ids that can't be enabled. The call refuses a listed id for every caller, the owner included. A profile that already has one enabled starts without mounting it and logs a warning.
+        - The list is set in our copy of the bundle file under the uid 0 condition, so it needs no edge change and is empty on the desktop. Today: `forge-bundle`, `tool-worktree`, `deepseek-chat-import`.
+        - box-containment composes every installed optional bundle and fails when one mounts a forbidden package and isn't listed.
+        - Chosen over confining `set`: it removes the callers, and it also covers chat-import, a DeepSeek contact, and bundles a later sync adds.
+        - Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box. Containment is about the model and members. **[my call]**
+    - `tool-cordis`, which upstream added to the standard preset, and the ptc preset's `tool-plugin-manager`, which upstream turned on, are off under root by the same switch.
   - **Ruling, sandbox and run-as:** our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.
     - Boxes run `danger-full-access` and rely on run-as and the fs roots, so "the write boundary follows the workspace root" bounds nothing there. The roots never read the workspace root.
     - box-containment passes unchanged in meaning. It loses entries for packages that no longer exist (the working-directory tool, Python PTC) and gains the classifications below. Any other change to an assertion is named in the PR.
