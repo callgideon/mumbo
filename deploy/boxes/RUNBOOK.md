@@ -155,7 +155,7 @@ The edge also gets `MAX_RUNNING_BOXES = 12 * node_count - 2`, read only by edge 
    (cd deploy/boxes/edge && node -e "import('./capacity.mjs').then(async c=>{const {Sandbox}=await import('e2b');console.log(await c.runningUnits(Sandbox))})")
    ```
    The result must be at most `2 * (12 * new_count - 2)`. Surplus nodes terminate through the drain hook: their boxes pause and resume on the remaining nodes. The same check applies when blue/green goes back from 2N to N.
-5. Blue/green node upgrades go through `node_count` only; never apply while the ASG desired capacity differs from `node_count`, and never change it with `set-desired-capacity` or a decrementing terminate. The ASG prefers the oldest launch template at scale-in, but it rebalances Availability Zones first, so protect the new nodes and check the result.
+5. Blue/green node upgrades go through `node_count` only; never apply while the ASG desired capacity differs from `node_count`, and never change it with `set-desired-capacity` or a decrementing terminate. The ASG prefers the oldest launch template at scale-in, but it rebalances Availability Zones first, so protect the new nodes and check the result. The node AMI is pinned per cell (`node_ami` in `prod/main.tf`): to move to a newer Ubuntu build, look up the new AMI id for that region, set `node_ami`, and take it through this blue/green with one new node tested first.
    1. Set `e2b_sha` and `node_count = 2N` (N at most 5) and apply. The unit cap doubles while both sets run. Wait until the ASG shows 2N in service and the new nodes are in `orchestrators.boxes.internal`.
    2. List the new nodes (those on the group's latest launch template version) and protect them from scale-in:
       ```sh

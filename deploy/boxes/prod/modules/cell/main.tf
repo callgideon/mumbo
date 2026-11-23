@@ -31,6 +31,10 @@ variable "node_count" {
   description = "Sandbox nodes: the ASG desired capacity."
   type        = number
 }
+variable "node_ami" {
+  description = "Sandbox node AMI (Ubuntu 24.04 amd64), pinned per cell. Move it only through the node blue/green (RUNBOOK, Adding nodes, step 5)."
+  type        = string
+}
 variable "ecr" {
   description = "Image prefix: <registry>/<repository prefix>; images are <this>/e2b-api and so on."
   type        = string

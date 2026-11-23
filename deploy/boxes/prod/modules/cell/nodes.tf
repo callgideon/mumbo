@@ -39,10 +39,6 @@ resource "aws_vpc_security_group_ingress_rule" "nodes" {
   to_port                      = each.value[1]
 }
 
-data "aws_ssm_parameter" "ubuntu" {
-  name = "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
-}
-
 resource "aws_iam_role" "nodes" {
   name               = "${local.name}-nodes"
   assume_role_policy = jsonencode({ Version = "2012-10-17", Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ec2.amazonaws.com" } }] })
@@ -81,7 +77,7 @@ resource "aws_iam_instance_profile" "nodes" {
 
 resource "aws_launch_template" "nodes" {
   name_prefix            = "${local.name}-node-"
-  image_id               = data.aws_ssm_parameter.ubuntu.insecure_value
+  image_id               = var.node_ami
   instance_type          = local.node_type
   update_default_version = true
   vpc_security_group_ids = [aws_security_group.nodes.id]

@@ -56,6 +56,7 @@ module "cell_us_east_1" {
   private_domain  = "boxes.internal" # the first cell keeps the names it had before cells
   e2b_sha         = var.e2b_sha
   node_count      = var.node_count
+  node_ami        = "ami-08b275ac6cc5dbefb" # Ubuntu 24.04, pinned 2026-11-23
   ecr             = local.ecr
   mtls_env        = local.mtls_env
   mtls_certs      = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves }
@@ -91,6 +92,7 @@ module "cell_ap_south_1" {
   db_instance_class = "db.t3.medium" # no db.t4g.medium capacity in ap-south-1 (2026-11-11)
   e2b_sha           = var.e2b_sha
   node_count        = var.node_count_ap_south_1
+  node_ami          = "ami-09d8c1e69d114dbf7" # Ubuntu 24.04, pinned 2026-11-23
   ecr               = local.ecr
   mtls_env          = local.mtls_env
   mtls_certs        = { ca_pem = module.mtls.ca_pem, leaves = module.mtls.leaves } # SPIFFE ids, not names: the same leaves serve every cell
