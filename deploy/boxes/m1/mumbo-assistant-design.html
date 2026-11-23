@@ -2676,7 +2676,14 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Kept in <code>ensure</code>: a missing original project is recreated empty and earlier Sessions are told once, and a directory the model swapped for a link out of the roots recovers to the original project.</li>
 <li><strong>Seen by the person:</strong> a Session in which the model had changed directory, and a subagent child started with a <code>cwd</code>, resume in their original project.</li>
 <li><code>tool-session-control</code> (<code>session_send_message</code>) stays off and is forbidden on boxes. It applies no Workspace restriction, so a member's turn could write into any Session.</li>
-<li>Every remaining caller that passes a directory to a subagent start or <code>workingDirectory.set</code> is listed in the PR with where the value comes from. A value the model can influence resolves through <code>resolveModelPath</code>.</li>
+<li>Every remaining caller that passes a directory to a subagent start or <code>workingDirectory.set</code> is listed in the PR with where the value comes from.</li>
+<li><strong>Amended [2026-11-23]: the worktree tools and the forge panel are forbidden on boxes.</strong> They are the callers a model can influence: <code>enter_worktree</code>'s name, and a repository root read from git metadata the model can write. <code>set</code> resolves through <code>fs.resolve</code>, which lets a path outside the roots pass. The roots and run-as don't follow the Session's directory, but root dsh's own reads do: instruction and skill discovery, and file views.
+<ul>
+<li>With those off, no enabled box plugin calls <code>set</code>, so <code>set</code> itself doesn't change in this sync.</li>
+<li>Before any plugin that calls <code>set</code> is allowed on a box, <code>set</code> resolves through <code>resolveModelPath</code> when the provider has model roots. Its own design item.</li>
+<li>Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and <code>set</code> is confined in this sync. <span class="tag m">my call</span></li>
+</ul>
+</li>
 </ul>
 </li>
 <li><strong>Ruling, sandbox and run-as:</strong> our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.

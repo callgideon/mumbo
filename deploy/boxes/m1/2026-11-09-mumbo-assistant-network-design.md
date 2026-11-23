@@ -1551,7 +1551,11 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - Kept in `ensure`: a missing original project is recreated empty and earlier Sessions are told once, and a directory the model swapped for a link out of the roots recovers to the original project.
     - **Seen by the person:** a Session in which the model had changed directory, and a subagent child started with a `cwd`, resume in their original project.
     - `tool-session-control` (`session_send_message`) stays off and is forbidden on boxes. It applies no Workspace restriction, so a member's turn could write into any Session.
-    - Every remaining caller that passes a directory to a subagent start or `workingDirectory.set` is listed in the PR with where the value comes from. A value the model can influence resolves through `resolveModelPath`.
+    - Every remaining caller that passes a directory to a subagent start or `workingDirectory.set` is listed in the PR with where the value comes from.
+    - **Amended [2026-11-23]: the worktree tools and the forge panel are forbidden on boxes.** They are the callers a model can influence: `enter_worktree`'s name, and a repository root read from git metadata the model can write. `set` resolves through `fs.resolve`, which lets a path outside the roots pass. The roots and run-as don't follow the Session's directory, but root dsh's own reads do: instruction and skill discovery, and file views.
+      - With those off, no enabled box plugin calls `set`, so `set` itself doesn't change in this sync.
+      - Before any plugin that calls `set` is allowed on a box, `set` resolves through `resolveModelPath` when the provider has model roots. Its own design item.
+      - Open: whether a person or a turn can turn those bundles on at runtime on a box. If so, the composition check isn't enough and `set` is confined in this sync. **[my call]**
   - **Ruling, sandbox and run-as:** our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.
     - Boxes run `danger-full-access` and rely on run-as and the fs roots, so "the write boundary follows the workspace root" bounds nothing there. The roots never read the workspace root.
     - box-containment passes unchanged in meaning. It loses entries for packages that no longer exist (the working-directory tool, Python PTC) and gains the classifications below. Any other change to an assertion is named in the PR.
