@@ -26,19 +26,19 @@ baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
     previous: "2026-11-05-mcp-message-source"
-    after: "12bf9822316484478396044ced9fd85d113028c288b5854dd12e3fe23a6081d5"
+    after: "b3cdbf403f1cf6fa953fa5f96f9fbcb2cb9f116f7a657b9b8ad815e10d09906c"
     decision: same-version
   - root: "event:developer/message"
     previous: "2026-11-05-mcp-message-source"
-    after: "4ff746fb6f467e9b89f92df53476a10c26638d57572ec0f94046fd4cf810d104"
+    after: "9a5f9b9af6759c4a64c9249a8d8cbd14755c3a6651b14403d2ac1538805f16e8"
     decision: same-version
   - root: "event:session/title-llm-request"
     previous: "2026-11-05-mcp-message-source"
-    after: "40dd32765c49c5177ceb86fc8383b4bd19858e3b445cbb4abf5d3820309c25e4"
+    after: "4569f49c67974ef1bf0d08ce0d9f40c6ba4e1ebfcb00d2cd5b13294fdfcdbd41"
     decision: same-version
   - root: "event:user/message"
     previous: "2026-11-05-mcp-message-source"
-    after: "2ad95fc11778969450c02aa9d23f1716e820f8ce4bec00d8a00be9f8c85e4e85"
+    after: "88abcc6b967bddaeb85c5a3cf9ef548bd6652ec72de3cbffd6b407b9f1463fe7"
     decision: same-version
 ```
 

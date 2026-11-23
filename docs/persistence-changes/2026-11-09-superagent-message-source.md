@@ -26,19 +26,19 @@ baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
     previous: "2026-11-09-mumbo-edge-member-principal"
-    after: "c04c341f9be056ec931e297ca2a6b8fd0af2af5044a9f9e47d17898717a5213c"
+    after: "d109121e52f1d1d63e16e01aecb89e64b3cf6fcd36cbfe353115e11f8a181839"
     decision: same-version
   - root: "event:developer/message"
     previous: "2026-11-09-mumbo-edge-member-principal"
-    after: "8365a54d8790bb4bed42f90c2ef0e8878bd15d71710411a1dea6068f0d194437"
+    after: "162518e99217e6a9b0ffda6cf05480bc567a81147b540c2c0f2da41d6993f836"
     decision: same-version
   - root: "event:session/title-llm-request"
     previous: "2026-11-09-mumbo-edge-member-principal"
-    after: "26b91610009e78fbae68506f52d06b2af95df1257019d257caf1a708f745cdd2"
+    after: "d887c6ef21e7eb0b221446108a42264e718cad7273a3afa26ce8fa6f07a3ae7c"
     decision: same-version
   - root: "event:user/message"
     previous: "2026-11-09-mumbo-edge-member-principal"
-    after: "e37b05a1ae468930cff046161f29a8a5e5d504779119ea00b88e5853eca8a307"
+    after: "7586e0ef19b4dc0040545216bcd6c98c42ca4d21f81ac92ba6146a4177a99771"
     decision: same-version
 ```
 
