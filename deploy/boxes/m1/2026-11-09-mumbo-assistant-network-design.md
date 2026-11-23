@@ -1607,6 +1607,55 @@ The cache's worst case is a subscription that dies silently: copies are served f
     5. The log has no line about a refused or unreadable Session, 0 unresolved plugins, and the K2 reconcile line.
     6. On bitlane: the member checks of B49c pass, a member is refused `/pairing/` and a dedicated owner channel, and each refusal writes its `remote-access/denied` line.
     7. One web search works on the founder's box.
+- **B56, connecting Notion and Slack** [2026-11-23; the founder, through mumbo: "we should be easily able to connect slack / notion to mumbo"]: a person connects an account once, on the Plugins page of their own box, and every Session on that box can then use it. Notion first, Slack second. It builds on B55's sync and ships after it, in its own PRs.
+  - **What upstream brings:** a Notion plugin of about 60 lines. It registers Notion's hosted MCP server (`https://mcp.notion.com/mcp`) with the MCP manager, and `mcp-account` with `ui-connector-account` put a "Connect Notion" button on the Plugins page. Sign-in is OAuth with dynamic client registration, so no Mumbo secret is involved. Upstream has no Slack plugin.
+  - **Scope: person boxes only.** On a project box every visitor is a member, and no member holds a connector action, so nobody could connect an account there. A project that needs Notion gets its own item. **[my call]**
+  - **Ruling, the rows:** `mcp-account`, `ui-connector-account` and `notion` are on for person boxes. This reverses B55's off switch for the first two, on person boxes only.
+    - They go in a harness-side person overlay that the edge applies when the image has it, as it does with the door's `person.overlay.yml`. The rows are then reviewed in a harness PR, and an older image still starts.
+    - `cli-account` and `upstream-skills` stay off. The other upstream connectors (Linear, Tencent, Feishu, DingTalk, WeCom) stay unmounted until asked for.
+    - B55's test that `mcp-account` and `tool-cordis` are off together becomes: `tool-cordis` is off wherever `mcp-account` is on.
+  - **Ruling, the callback reaches the box through the edge:**
+    - Upstream builds the redirect address from the listener's own origin, which on a box is a private address no browser can reach. `mcp-client` gains a validated setting for the redirect origin, and person boxes set it to the public address they already get as `--public-url` (`https://app.mumbo.si`). The callback then compares against that origin, which is the Host a box already sees.
+    - The path is `/mcp/oauth/callback/<64 hex>`, the same for every person, since it hashes the fixed credential key. The edge routes it like any other request, to the signed-in person's own box.
+    - **The edge never answers it with the launch redirect.** Notion's redirect is a cross-site navigation and may arrive without the box's cookie; today the edge would send it to `/?token=…` and the code would be lost. The callback needs no box cookie: it answers before route admission and checks a 256-bit `state` in constant time.
+    - On a project site the edge answers that path 404 and forwards nothing.
+    - A callback for a person who isn't signed in to Mumbo goes through sign-in first and then lands, if the attempt hasn't timed out.
+  - **Ruling, the name people see:** upstream registers the client as "DeepSeek Harness", which is what Notion's consent page would show. The client name becomes a setting, and boxes set "Mumbo". **[my call]**
+  - **Where the grant lives:** in the box's credentials store under `/root/.dsh`, readable by root only, outside the model roots, and in the box's backups, so it survives a recreate and a move between regions. The model never sees the token; root dsh calls Notion and the model sees tool results.
+    - Signing out deletes the local grant and doesn't revoke it at Notion. The page says so.
+    - A restore from an older backup can bring back a grant the person had signed out of. Accepted, and stated in the runbook.
+  - **Who can start or read a sign-in:** the box's owner only. `connectorAccounts/*` is in no member role, and the rows aren't on project boxes at all. A model turn can't start one: `tool-cordis` stays off. A test pins each.
+  - **What the model may do with it:**
+    - Notion's tools are MCP tools, so they follow the existing rule: Full access asks none.
+    - Reading, creating and editing pages are automatic.
+    - Tools that delete, or that share or invite, are not offered in this first version. Deleting is a one-tap action (section 4), and one-tap approvals exist only at the edge, which doesn't see MCP calls. If `mcp-client` can't withhold named tools, that comes back here before the build goes further. **[my call; the founder may widen it]**
+    - What Notion returns is outside text, like a web page. It can carry instructions written by someone else. Nothing new guards against that here; the withheld tools bound what such text could cause.
+  - **Network:** root dsh on a person box reaches `mcp.notion.com` and Notion's authorization host directly. mumbo confirms the box's egress rules allow it, and that `agent`'s rules don't change.
+  - **Slack, second:**
+    - Slack's hosted MCP server (`https://mcp.slack.com/mcp`) doesn't accept dynamic client registration. Its documentation says a client must be a registered Slack app with a fixed id, using that app's client id and secret.
+    - So Slack needs a Mumbo Slack app, which the founder creates, and upstream's OAuth client needs a way to use a pre-registered client. Neither exists yet.
+    - **The client secret never goes to a box.** It stays in Secrets Manager, and the edge adds it: a box sends its code exchange and its refreshes to an edge forwarder, as it does for GitHub tokens. A secret copied to every box would sit in every backup. **[my call]**
+    - First version reads only: search, channels and threads the person can see. Sending a message is "sent as the founder", which is one tap (section 4) and waits for part C's approval at the edge.
+    - Before any build, impl checks against Slack's documentation and a test app: which app types may use the MCP server (an app internal to one workspace, or only a listed one), the scopes, and whether the token endpoint accepts a forwarded exchange. The plan follows that answer.
+  - **Tests (Notion):**
+    - Upstream's `notion-connection.e2e.ts` and its OAuth fixture run under the person box overlays, with the redirect origin set to a public-style address.
+    - The redirect address the fixture's authorization server receives is the public origin plus the callback path, and the registered client name is "Mumbo".
+    - A callback with a wrong `state`, a second callback, and one after the timeout are refused.
+    - A member is refused every `connectorAccounts` action, and the project box composition mounts none of the three rows.
+    - Edge: the callback path gets no launch redirect on a person site, with and without a box cookie, and 404 on a project site.
+    - Removing the redirect-origin setting, or the edge's exemption, fails a test.
+  - **PRs and order:** after B55 is merged and rolled out.
+    1. Harness: the two settings in `mcp-client`, the person overlay with the three rows, the gates and docs. It includes a GIF of connecting against the fixture, since the Plugins page changes for a person.
+    2. Edge: the overlay flag, the redirect-origin value, and the callback path's exemption.
+    - Deploy the edge first. With the old image it has nothing to forward. The image alone would show a button whose sign-in can't complete.
+  - **Rollout check (mumbo):**
+    1. On the founder's box, Plugins shows Notion as not connected. "Connect Notion" opens Notion's consent page, which names Mumbo.
+    2. After approving, the page says the authorization was received and the section shows Connected.
+    3. In a new Session, the model finds a named Notion page and creates a test page. No delete, share or invite tool is listed.
+    4. After a recreate from backup, Notion is still connected.
+    5. On bitlane, the Plugins page offers no Notion account, and a member's `connectorAccounts/start` is refused with its log line.
+    6. Sign out, and the section shows not connected.
+  - **For the founder to decide:** whether Notion deletes should be offered once approvals can cover them, and when to create the Slack app.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.
