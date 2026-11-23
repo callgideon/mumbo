@@ -2703,7 +2703,11 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The edge still finds the launch token: Token's entry is printed as <code>dsh web: &lt;url&gt;?token=…</code>. A test asserts exactly one printed line holds <code>token=</code>.</li>
 </ul>
 </li>
-<li><strong>Ruling, MCP client:</strong> our diff there is B24's (stdio servers run as the configured identity, with roots). It is re-applied on upstream's structure. <code>identity</code> and <code>roots</code> must be in upstream's new <code>config.ts</code> schema, or validation drops them and a stdio server starts as root. A test fails when they're removed.</li>
+<li><strong>Ruling, MCP client:</strong> our diff there is B24's (stdio servers run as the configured identity, with roots). It is re-applied on upstream's structure. <code>identity</code> and <code>roots</code> go into upstream's new <code>config.ts</code> schema, so <code>identity</code> is validated and <code>roots</code> defaults to none. Without the rows the value passes through unvalidated or the entry fails to load; it doesn't start a server as root (read from the schema library, to be confirmed by a run). A test fails when they're removed, and a box-composition test shows a stdio server starting as its identity and one with no usable identity refused.
+<ul>
+<li>Upstream's new MCP OAuth callback answers before route admission, but is registered only during an authorization attempt. On a box nothing starts one: <code>mcp-account</code> is off and <code>tool-cordis</code> is forbidden, and a test asserts both together.</li>
+</ul>
+</li>
 <li><strong>Ruling, rows new since the merge base:</strong> off on a box unless listed as on. Off uses B51's switch, <code>disabled: !!js &quot;process.getuid?.() === 0&quot;</code> in our copy of the bundle file, so no edge change and no deploy order. Each off row is in FORBIDDEN with its reason.
 <ul>
 <li><strong>On:</strong> <code>deepseek-auth</code> (model routes need it; it contacts only the <code>DEEPSEEK_BASE_URL</code> origin), <code>authentication-token</code>, the new client-only rows, and action cards and plugin recommendations in whatever state their <code>experimental</code> predecessors had.</li>
