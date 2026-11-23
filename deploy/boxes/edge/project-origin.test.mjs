@@ -56,7 +56,7 @@ async function setup(extra = {}) {
   return { id, key, seen, ensured, approved, port, host: `p-${id}.${cfg.projectDomain}`, close: () => { server.close(); fakeBox.close() } }
 }
 
-test('a member on p-<id>.<project domain> reaches the project box at /, as themselves, without the sign-in cookie', async () => {
+test('a member on p-<id>.<project domain> reaches the project box at /, as themselves, without any cookie', async () => {
   const t = await setup()
   try {
     const r = await call(t.port, { headers: { host: `P-${t.id}.Boxes.Mumbo.Si:443`, cookie: '_oauth2_proxy_mumbo=s; _oauth2_proxy_mumbo_1=s; _oauth2_proxy=s; dsh-auth-p=1', 'x-mumbo-member': 'forged' } })
@@ -66,7 +66,7 @@ test('a member on p-<id>.<project domain> reaches the project box at /, as thems
     const got = t.seen[0]
     assert.equal(got.path, '/')
     assert.equal(got.headers['e2b-sandbox-id'], 'pbox')
-    assert.equal(got.headers.cookie, 'dsh-auth-p=1')
+    assert.equal(got.headers.cookie, undefined, 'a member-forwarded request carries no cookie, so no dsh owner cookie rides with the member header (B55)')
     assert.equal(memberOf(t.key, got.headers['x-mumbo-member']), 'a@x.com')
     assert.equal((await call(t.port, { path: '/deny', headers: { host: t.host } })).status, 401, 'a member 401 is not turned into an owner launch')
     assert.deepEqual(t.ensured, [`project:${t.id}`, `project:${t.id}`])
@@ -108,7 +108,7 @@ test('a WebSocket upgrade on a project host reaches the project box with a fresh
   const t = await setup()
   try {
     const own = `https://${t.host}`
-    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: own, cookie: '_oauth2_proxy_mumbo=s; _oauth2_proxy=s', 'x-mumbo-member': 'forged', ...upgrade } })
+    const ws = await call(t.port, { path: '/api/remote.mux', headers: { host: t.host, origin: own, cookie: '_oauth2_proxy_mumbo=s; _oauth2_proxy=s; dsh-auth-p=1', 'x-mumbo-member': 'forged', ...upgrade } })
     assert.ok(ws.upgraded, JSON.stringify(ws))
     const got = t.seen[0]
     assert.equal(got.path, '/api/remote.mux')

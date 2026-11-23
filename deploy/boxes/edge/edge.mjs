@@ -1671,6 +1671,14 @@ export function boxHeaders(cfg, incoming, target, service = 'dsh') {
   if (target.traffic) out['e2b-traffic-access-token'] = target.traffic
   return out
 }
+/** Box headers for a request the edge forwards as a member: the signed `x-mumbo-member` header and no Cookie, so a
+ *  member request never also carries a dsh owner cookie the box could admit as the owner (B55). Without `member`, the
+ *  headers pass unchanged. */
+export const asMember = (headers, member) => {
+  if (!member) return headers
+  const { cookie: _cookie, ...rest } = headers
+  return { ...rest, 'x-mumbo-member': member }
+}
 export const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 /** Headers of the edge's own pages (the approve page, the key manager, the home page): no script, no framing, no caching. */
 export const PAGE_SECURITY = {
@@ -1708,7 +1716,7 @@ export const BOX_ANSWER_MAX = 8 * 1024 * 1024
  *  bytes. */
 export const boxFetcher = (cfg) => (target, siteHost, path, { method = 'GET', headers = {}, body, member, service = 'dsh', edgeHeaders = {}, timeoutMs = 60_000 } = {}) => new Promise((resolve, reject) => {
   const req = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method, path,
-    headers: { ...boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, service), ...(member ? { 'x-mumbo-member': member } : {}), ...edgeHeaders } }, (r) => {
+    headers: { ...asMember(boxHeaders(cfg, { ...headers, host: siteHost, origin: `https://${siteHost}`, ...(body ? { 'content-length': Buffer.byteLength(body) } : {}) }, target, service), member), ...edgeHeaders } }, (r) => {
     const chunks = []
     let size = 0
     r.on('data', (c) => {
@@ -1901,7 +1909,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
     const launch = `${to.base}/?token=${target.token}`
     if (dsh && !member && needsLaunch(req)) return res.writeHead(302, { location: launch, 'cache-control': 'no-store' }).end()
     quiet(box.touch(target.id))
-    const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers: { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}) } }, (r) => {
+    const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers: asMember(boxHeaders(cfg, req.headers, target, to.service), member) }, (r) => {
       // A stale cookie (another account on this browser, or a recreated box) gets a fresh exchange instead of a dead end.
       // The cached launch token may be stale too (another replica's repair or a wake restarted dsh): the cached target
       // goes, so the exchange's own 401 redirects to the store's token instead of looping.
@@ -1950,7 +1958,7 @@ export function userServer({ cfg, box, verifyAlb, projects, approve, signin, key
       const target = await box.ensure(key)
       quiet(box.touch(target.id))
       const member = to.project && target.member ? target.member(email) : undefined
-      const headers = { ...boxHeaders(cfg, req.headers, target, to.service), ...(member ? { 'x-mumbo-member': member } : {}), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
+      const headers = { ...asMember(boxHeaders(cfg, req.headers, target, to.service), member), connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' }
       const up = httpRequest({ host: target.proxy.hostname, port: target.proxy.port, method: req.method, path: to.path, headers })
       up.on('upgrade', (r, upSocket, upHead) => {
         const lines = Object.entries(secureCookies(cfg, { ...r.headers })).flatMap(([k, v]) => [v].flat().map(x => `${k}: ${x}`))
