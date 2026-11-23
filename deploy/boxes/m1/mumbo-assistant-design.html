@@ -2784,7 +2784,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <ul>
 <li>Upstream builds the redirect address from the listener's own origin, which on a box is a private address no browser can reach. <code>mcp-client</code> gains a validated setting for the redirect origin, and person boxes set it to the public address they already get as <code>--public-url</code> (<code>https://app.mumbo.si</code>). The callback then compares against that origin, which is the Host a box already sees.</li>
 <li>The path is <code>/mcp/oauth/callback/&lt;64 hex&gt;</code>, the same for every person, since it hashes the fixed credential key. The edge routes it like any other request, to the signed-in person's own box.</li>
-<li><strong>The edge never answers it with the launch redirect.</strong> Notion's redirect is a cross-site navigation and may arrive without the box's cookie; today the edge would send it to <code>/?token=…</code> and the code would be lost. The callback needs no box cookie: it answers before route admission and checks a 256-bit <code>state</code> in constant time.</li>
+<li><strong>The edge never answers it with the launch redirect.</strong> Notion's redirect is a cross-site navigation, and the box's <code>dsh-auth-*</code> cookie is <code>SameSite=Strict</code>, so it never arrives with the callback [read on the founder's box, 2026-11-23]. Today the edge would send every callback to <code>/?token=…</code> and the code would be lost. The edge's own sign-in cookie is <code>SameSite=Lax</code>, so the edge still knows who the person is. The callback needs no box cookie: it answers before route admission and checks a 256-bit <code>state</code> in constant time.</li>
 <li>On a project site the edge answers that path 404 and forwards nothing.</li>
 <li>A callback for a person who isn't signed in to Mumbo goes through sign-in first and then lands, if the attempt hasn't timed out.</li>
 </ul>
@@ -2805,7 +2805,11 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>What Notion returns is outside text, like a web page. It can carry instructions written by someone else. Nothing new guards against that here; the withheld tools bound what such text could cause.</li>
 </ul>
 </li>
-<li><strong>Network:</strong> root dsh on a person box reaches <code>mcp.notion.com</code> and Notion's authorization host directly. mumbo confirms the box's egress rules allow it, and that <code>agent</code>'s rules don't change.</li>
+<li><strong>Network:</strong> root dsh on a person box reaches <code>mcp.notion.com</code> and Notion's authorization host directly. <strong>Confirmed [2026-11-23]</strong> on the founder's box: the box's output rules restrict by destination port, not by host, and Notion's metadata offers a registration endpoint. No rule changes. <code>agent</code> can reach Notion too, as it can any host, but holds no grant.
+<ul>
+<li>The connectors overlay is applied under the same condition as the state overlay (a person box with a desktop), behind an existence check.</li>
+</ul>
+</li>
 <li><strong>Slack, second:</strong>
 <ul>
 <li>Slack's hosted MCP server (<code>https://mcp.slack.com/mcp</code>) doesn't accept dynamic client registration. Its documentation says a client must be a registered Slack app with a fixed id, using that app's client id and secret.</li>
