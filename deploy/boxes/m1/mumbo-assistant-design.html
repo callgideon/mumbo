@@ -2689,7 +2689,14 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The list is set in our copy of the bundle file under the uid 0 condition, so it needs no edge change and is empty on the desktop. Today: <code>forge-bundle</code>, <code>tool-worktree</code>, <code>deepseek-chat-import</code>.</li>
 <li>box-containment composes every installed optional bundle and fails when one mounts a forbidden package and isn't listed.</li>
 <li>Chosen over confining <code>set</code>: it removes the callers, and it also covers chat-import, a DeepSeek contact, and bundles a later sync adds.</li>
-<li>Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box. Containment is about the model and members. <span class="tag m">my call</span></li>
+<li>Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box (<code>pluginManager/installBundle</code> takes any package). Containment is about the model and members. <span class="tag m">my call</span></li>
+<li><strong>Amended [2026-11-23]: the list lives on a row the edge doesn't patch, and also names rows.</strong>
+<ul>
+<li>An overlay patch replaces a row's whole <code>config</code>. The edge's <code>plugin-manager</code> row sets <code>modelTools: false</code>, so a list set on that row in the image would be erased on every box. The list has one home that no containment overlay patches, and app-boot and plugin-manager both read it. The edge's row stays as it is, and the box-edge fixtures keep mirroring it. A gate, and the edge's own containment test, fail if an overlay patches the list's row.</li>
+<li>The owner can also switch single rows on with <code>pluginManager/setPluginEnabled</code>, which writes after the bundle layers. So &quot;off under root&quot; is a default for the owner. For three rows it is a prohibition, and the list names them: <code>remote-connection</code>, <code>cli-account</code>, <code>upstream-skills</code>.</li>
+<li>The other off rows stay defaults. On a person box the owner's choice affects their own box, and on a project box every visitor is a member, who is refused every plugin action. <span class="tag m">my call</span></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>

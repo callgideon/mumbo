@@ -1562,7 +1562,11 @@ The cache's worst case is a subscription that dies silently: copies are served f
         - The list is set in our copy of the bundle file under the uid 0 condition, so it needs no edge change and is empty on the desktop. Today: `forge-bundle`, `tool-worktree`, `deepseek-chat-import`.
         - box-containment composes every installed optional bundle and fails when one mounts a forbidden package and isn't listed.
         - Chosen over confining `set`: it removes the callers, and it also covers chat-import, a DeepSeek contact, and bundles a later sync adds.
-        - Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box. Containment is about the model and members. **[my call]**
+        - Its limit: it closes the one-click path. It doesn't stop an owner who installs plugin code on their own box (`pluginManager/installBundle` takes any package). Containment is about the model and members. **[my call]**
+        - **Amended [2026-11-23]: the list lives on a row the edge doesn't patch, and also names rows.**
+          - An overlay patch replaces a row's whole `config`. The edge's `plugin-manager` row sets `modelTools: false`, so a list set on that row in the image would be erased on every box. The list has one home that no containment overlay patches, and app-boot and plugin-manager both read it. The edge's row stays as it is, and the box-edge fixtures keep mirroring it. A gate, and the edge's own containment test, fail if an overlay patches the list's row.
+          - The owner can also switch single rows on with `pluginManager/setPluginEnabled`, which writes after the bundle layers. So "off under root" is a default for the owner. For three rows it is a prohibition, and the list names them: `remote-connection`, `cli-account`, `upstream-skills`.
+          - The other off rows stay defaults. On a person box the owner's choice affects their own box, and on a project box every visitor is a member, who is refused every plugin action. **[my call]**
     - `tool-cordis`, which upstream added to the standard preset, and the ptc preset's `tool-plugin-manager`, which upstream turned on, are off under root by the same switch.
   - **Ruling, sandbox and run-as:** our structure in subprocess-local and fs-local, with upstream's refactors folded in. Upstream's changes to both files are cosmetic.
     - Boxes run `danger-full-access` and rely on run-as and the fs roots, so "the write boundary follows the workspace root" bounds nothing there. The roots never read the workspace root.
