@@ -26,7 +26,6 @@ export interface UnitExclusion {
 
 /** The unit job's exclusions, one entry per package, package glob or spec glob. */
 export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
-  { path: 'packages/experimental/ptc-runtime-python', category: 'not-mounted', reason: 'No row or preset names it; only the installation manifest lists it, and its README says no shipped profile enables it.' },
   { path: 'packages/subagent/subagent-acp', category: 'not-mounted', reason: 'No bundle, preset or overlay row names it; only its own test fixtures mount it.' },
   { path: 'packages/subagent/subagent-dsh-sdk', category: 'not-mounted', reason: 'No bundle, preset or overlay row names it; only its own test fixtures mount it.' },
   { path: 'packages/sdk/client', category: 'not-mounted', reason: 'Client library for programs that drive dsh over stdio; no profile imports it.' },

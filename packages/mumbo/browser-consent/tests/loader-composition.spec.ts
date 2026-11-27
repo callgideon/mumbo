@@ -1,13 +1,16 @@
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/brand'
+import type { BrowserUseProviderName } from '@deepseek-ai/dsh-browser-use/types'
 import * as PlaywrightBrowser from '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'
 import { mountSessionMcp } from '@deepseek-ai/dsh-experimental-browser-use-runtime/mcp'
 import { ToolCallId, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { SubprocessChildIdentity } from '@deepseek-ai/dsh-subprocess'
+import * as McpClient from '@deepseek-ai/dsh-mcp-client'
+import McpServerManager from '@deepseek-ai/dsh-mcp-manager'
+import type { SubprocessChildIdentity, SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { defineContentToolFixture, executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { PreToolDecision, ToolExecution, ToolExecutionResult, ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -15,6 +18,8 @@ import { bootComposition, consentRecords, tool, toolResults } from './harness.ts
 import type { ScriptStep } from './harness.ts'
 
 const FIXTURE = fileURLToPath(new URL('./playwright-fixture.mjs', import.meta.url))
+/** A stdio MCP server whose one tool reports the client's declared capabilities and its answer to `roots/list`. */
+const ROOTS_SERVER = fileURLToPath(new URL('../../../mcp/mcp-client/tests/fixtures/roots-server.mjs', import.meta.url))
 /** Cordis `FiberState.ACTIVE`. */
 const ACTIVE = 2
 /** Cordis `FiberState.FAILED`. */
@@ -317,7 +322,7 @@ describe('browser write consent in the person-box composition', () => {
   it('refuses a known non-MCP provider by its tool prefix, and fails or reports truthfully for an unknown one', { timeout: 60_000 }, async () => {
     let acted = false
     const holder = (providerName: string) => ({ inject: ['browserUse', 'tools'], apply(ctx: Context) {
-      ctx.effect(() => ctx.browserUse.register(BrowserUseProviderName(providerName)))
+      ctx.effect(() => ctx.browserUse.register(providerName as BrowserUseProviderName))
       ctx.tools.register(defineContentToolFixture({ name: 'stagehand_act', description: 'Act.', parameters: {}, execute: () => {
         acted = true
         return Promise.resolve([{ type: 'text', text: 'acted' }])
@@ -335,7 +340,7 @@ describe('browser write consent in the person-box composition', () => {
     expect(unknownFirst.consentFiber?.state).toBe(FAILED)
     expect(unknownFirst.errors).toContainEqual(expect.stringContaining('browser provider "mystery" holds browserUse and its tools have no prefix this plugin can refuse'))
 
-    const late = { inject: PlaywrightBrowser.inject, apply(ctx: Context) { ctx.effect(() => ctx.browserUse.register(BrowserUseProviderName('mystery'))) } }
+    const late = { inject: PlaywrightBrowser.inject, apply(ctx: Context) { ctx.effect(() => ctx.browserUse.register('mystery' as BrowserUseProviderName)) } }
     const unknownLate = await load({ after: [['mystery', late]] })
     expect(unknownLate.consentFiber?.state).toBe(ACTIVE)
     expect(unknownLate.ctx.browserUse.providerName).toBe('mystery')
@@ -798,6 +803,87 @@ describe('browser write consent in the person-box composition', () => {
   })
 })
 
+const linux = process.platform === 'linux' ? describe : describe.skip
+
+linux('stdio MCP servers under a box\'s run-as subprocess provider', () => {
+  /**
+   * A box's subprocess row and its config: children run as a run-as identity, and `browsermcp` and `mcpserver` are named
+   * identities with homes of their own. The test is not root, so every identity holds this process's own ids and the
+   * spawn request's `identity` is what selects the user. The row records each spawn request it receives.
+   */
+  async function box(options: { serverIdentity?: string }) {
+    const scratch = await realpath(await mkdtemp(join(tmpdir(), 'mumbo-browser-consent-box-')))
+    roots.push(scratch)
+    // Run-as refuses a temporary directory other users can write.
+    vi.stubEnv('TMPDIR', scratch)
+    const own = { uid: process.getuid!(), gid: process.getgid!(), groups: [...new Set(process.getgroups!())].sort((a, b) => a - b) }
+    const secretNames = ['DEEPSEEK_API_KEY']
+    const homes = { browsermcp: join(scratch, 'browsermcp'), mcpserver: join(scratch, 'mcpserver') }
+    for (const home of Object.values(homes)) await mkdir(home, { mode: 0o700 })
+    const identity = (name: keyof typeof homes) => ({ ...own, inherit: [], set: { HOME: homes[name], USER: name, PATH: '/usr/bin:/bin' }, secretNames })
+    const specs: SubprocessSpawnSpec[] = []
+    class RecordingSubprocess extends LocalSubprocessRuntime {
+      override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
+        specs.push(spec)
+        return super.spawn(spec)
+      }
+    }
+    const config = {
+      runAs: { ...own, inherit: [], set: { HOME: '/home/agent', USER: 'agent' }, secretNames },
+      identities: { browsermcp: identity('browsermcp'), mcpserver: identity('mcpserver') }, ...options,
+    }
+    const root = join(scratch, 'root')
+    await mkdir(root, { mode: 0o700 })
+    // The browser's own server runs as browsermcp, as on a box.
+    const browser = { mode: 'attach', endpoint: 'http://127.0.0.1:9', identity: 'browsermcp', outputDir: join(root, '.playwright-mcp') }
+    /** Each spawn request by the server's script, the identity it names, and its directory. */
+    const started = () => specs.map(spec => [spec.argv[1], spec.identity, spec.cwd]).sort()
+    return { row: ['subprocess', RecordingSubprocess] as const, config, homes, root, browser, started }
+  }
+  const stdio = { transport: 'stdio', command: process.execPath, args: [ROOTS_SERVER] }
+  /** What the roots server of one row or entry reports. */
+  const report = async (loaded: Awaited<ReturnType<typeof load>>, server: string) =>
+    JSON.parse(textOf(await direct(loaded, `mcp__${server}__roots`, {}))) as { capabilities: Record<string, unknown>; answer: { result: { roots: unknown[] } } | null }
+
+  it('starts each server through the provider as its identity, in that identity\'s home, and answers roots/list with the row\'s roots', { timeout: 60_000 }, async () => {
+    const { row, config, homes, root, browser, started } = await box({ serverIdentity: 'mcpserver' })
+    const offered = join(root, 'staging')
+    const loaded = await load({
+      root, consent: { browser }, before: [row, ['files', McpClient], ['mcpManager', McpServerManager]],
+      inject: { files: ['subprocess'], mcpManager: ['subprocess'] },
+      configs: {
+        subprocess: config,
+        files: { ...stdio, serverName: 'files', identity: 'browsermcp', roots: [offered], failOnStartupError: true, startupTimeoutMs: 30_000 },
+        // A manager entry has neither `identity` nor `roots`.
+        mcpManager: { servers: { notes: stdio } },
+      },
+    })
+    await vi.waitFor(() => { expect(loaded.ctx.get('mcpManager')?.list()[0]?.status.state).toBe('connected') }, { timeout: 30_000 })
+    expect(loaded.errors).toEqual([])
+    expect(started()).toEqual([
+      [FIXTURE, 'browsermcp', homes.browsermcp], [ROOTS_SERVER, 'browsermcp', homes.browsermcp], [ROOTS_SERVER, 'mcpserver', homes.mcpserver],
+    ].sort())
+    expect((await report(loaded, 'files')).answer?.result.roots).toEqual([{ uri: pathToFileURL(offered).href }])
+    const notes = await report(loaded, 'notes')
+    expect(notes.capabilities).not.toHaveProperty('roots')
+    expect(notes.answer).toBeNull()
+  })
+
+  it('refuses a row\'s server that names no identity when the provider names no server identity, and starts nothing for it', { timeout: 60_000 }, async () => {
+    const { row, config, homes, root, browser, started } = await box({})
+    const loaded = await load({
+      root, consent: { browser }, before: [row, ['files', McpClient]], inject: { files: ['subprocess'] },
+      configs: { subprocess: config, files: { ...stdio, serverName: 'files', failOnStartupError: true, startupTimeoutMs: 30_000 } },
+    })
+    expect(loaded.ctx.get('subprocess')?.childIdentity).toEqual({ uid: config.runAs.uid, gid: config.runAs.gid, groups: config.runAs.groups })
+    expect([...loaded.ctx.loader.entries()].find(entry => entry.options.id === 'files')!.fiber?.state).toBe(FAILED)
+    expect(loaded.errors).toContainEqual(expect.stringContaining('names no serverIdentity'))
+    expect(loaded.ctx.tools.schemas(loaded.agent).filter(schema => schema.name.startsWith('mcp__files__'))).toEqual([])
+    // Only the browser's server, which names its identity, started.
+    expect(started()).toEqual([[FIXTURE, 'browsermcp', homes.browsermcp]])
+  })
+})
+
 describe('take over', () => {
   const TAKEN_OVER = 'Browser and desktop tools stay unavailable until they hand it back.'
   const refused = (name: string) => `Error: ${name} did not run: the person has taken over the browser. ${TAKEN_OVER}`
@@ -836,7 +922,7 @@ describe('take over', () => {
     const takeover = takeoverOf(loaded)
     expect(takeover.hold).toEqual({ kind: 'free' })
     // An Agent-less read reaches no browser whether or not the person has it.
-    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}, false))).toMatch(/browser tool belongs to another Session/u)
+    expect(textOf(await direct(loaded, tool('browser_snapshot'), {}, false))).toMatch(/browser tools require a calling Agent/u)
     // Handing back a browser the person does not have changes nothing, and a Session that never called the browser has
     // no connection to close.
     await takeover.handBack()

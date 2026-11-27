@@ -21,6 +21,15 @@
       name: '@deepseek-ai/dsh-plugin-manager'
       disabled: !!js "!ctx.get('profileContext')"
 
+    # Where dsh runs as root, i.e. on boxes: the optional bundles that mount a package no box may run, and the rows that
+    # are off there and must stay off, cannot be enabled by anyone. No other layer may patch this row: a patch of its
+    # `config` replaces both lists (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
+    - id: plugin-deny-list
+      name: '@deepseek-ai/dsh-plugin-manager/deny-list'
+      config:
+        bundles: !!js "process.getuid?.() === 0 ? ['@deepseek-ai/dsh-experimental-forge-bundle', '@deepseek-ai/dsh-experimental-tool-worktree', '@deepseek-ai/dsh-deepseek-chat-import'] : []"
+        rows: !!js "process.getuid?.() === 0 ? ['remote-connection', 'cli-account', 'upstream-skills'] : []"
+
     - id: timer
       name: '@deepseek-ai/cordis-plugin-timer'
 
@@ -237,8 +246,11 @@
 
     # CLI app plugins register their vendor CLI and account with this Service,
     # which adds nothing to a composition until one registers.
+    # Off where dsh runs as root, i.e. on boxes: it starts vendor CLIs in the home directory of dsh itself
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: cli-account
       name: '@deepseek-ai/dsh-cli-account'
+      disabled: !!js "process.getuid?.() === 0"
 
     # Every shipped CLI mode starts with the same file-effect boundary.
     # The environment remains an explicit deployment override; otherwise fresh
@@ -326,8 +338,11 @@
 
     # CLI app plugins register their entry skill and its pinned upstream files
     # with this Service, which downloads nothing until one registers.
+    # Off where dsh runs as root, i.e. on boxes: it downloads skill files into root dsh for CLI app plugins, which no box mounts
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: upstream-skills
       name: '@deepseek-ai/dsh-upstream-skills'
+      disabled: !!js "process.getuid?.() === 0"
 
     - id: commands
       name: '@deepseek-ai/dsh-commands'

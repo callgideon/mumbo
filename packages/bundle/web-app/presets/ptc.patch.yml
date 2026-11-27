@@ -133,9 +133,11 @@
             name: '@deepseek-ai/dsh-tool-present'
           - id: tool-office
             name: '@deepseek-ai/dsh-tool-office'
+          # Off where dsh runs as root, i.e. on boxes: installing or enabling a plugin loads code into the Host process
+          # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
           - id: tool-plugin-manager
             name: '@deepseek-ai/dsh-plugin-manager/tools'
-            disabled: !!js "!ctx.get('profileContext')"
+            disabled: !!js "process.getuid?.() === 0 || !ctx.get('profileContext')"
           - id: tool-plugin-market
             name: '@deepseek-ai/dsh-plugin-market/tools'
             disabled: true

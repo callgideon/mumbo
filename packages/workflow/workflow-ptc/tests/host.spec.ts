@@ -126,6 +126,32 @@ describe('workflow host callback validation', () => {
       await run.dispose()
     }
   })
+
+  it('starts a child in the Host-selected directory whatever directory the script names', async () => {
+    const named = '/etc'
+    const { ctx, start, parent } = await setup(async (bindings) => {
+      await bindings.startChild!({
+        prompt: 'child', cwd: named, workingDirectory: named, directory: named, workspaceRoot: named,
+        agentOptions: { cwd: named }, meta: { cwd: named }, parent: { cwd: named },
+      })
+      return completed
+    })
+    const childStart = vi.spyOn(ctx.subagents, 'startActivation')
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      const { signal, parent: delegatedParent, ...request } = childStart.mock.calls[0]![0]
+      expect(signal).toBeInstanceOf(AbortSignal)
+      expect(delegatedParent).toBe(parent)
+      // The whole request: nothing the script named reaches it.
+      expect(request).toEqual({
+        provider: 'stub', label: 'host-test child 1', delivery: 'caller', cwd: ctx.workingDirectory.get(parent.session),
+        prompt: [{ type: 'text', text: 'child' }],
+      })
+    } finally {
+      await run.dispose()
+    }
+  })
   it.each([
     ['startChild', null, 'requires an object'],
     ['startChild', [], 'requires an object'],

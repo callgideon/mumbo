@@ -162,8 +162,11 @@
 
     # MCP connector accounts on the Plugins page; connectors register their
     # OAuth server with `ctx.mcpAccounts`.
+    # Off where dsh runs as root, i.e. on boxes: connector accounts sign in through an OAuth callback route on the box
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: mcp-account
       name: '@deepseek-ai/dsh-mcp-account'
+      disabled: !!js "process.getuid?.() === 0"
 
     # Workspace commands and reconnect-safe projection over Typert Remote.
     - id: workspace-controller
@@ -351,8 +354,11 @@
     - id: ui-settings-general
       name: '@deepseek-ai/dsh-client-ui-settings-general'
 
+    # Off where dsh runs as root, i.e. on boxes: its anonymous pairing routes and owner cookie are a second way to become the owner
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: remote-connection
       name: '@deepseek-ai/dsh-client-remote-connection'
+      disabled: !!js "process.getuid?.() === 0"
 
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
@@ -365,8 +371,11 @@
 
     # Connector account sections on the Plugins page; CLI app plugins and MCP
     # connectors register their accounts with `ctx.connectorAccounts`.
+    # Off where dsh runs as root, i.e. on boxes: no connector account plugin is mounted there
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: ui-connector-account
       name: '@deepseek-ai/dsh-client-ui-connector-account'
+      disabled: !!js "process.getuid?.() === 0"
 
     - id: ui-conversation
       name: '@deepseek-ai/dsh-client-ui-conversation'
@@ -414,18 +423,26 @@
     # Personalized recommendations: one optional card below an answer that
     # offers a new personalized page or an official plugin. The two kinds
     # register into action-cards; its `enabled` field is the Settings switch.
+    # Off where dsh runs as root, i.e. on boxes: the recommendation cards were not mounted there before, and creation recommendations start a subagent under the creator preset
+    # (.agents/notes/implemented/architecture/2026-11-10-agent-containment-run-as-and-model-roots.md).
     - id: action-cards
       name: '@deepseek-ai/dsh-action-cards'
+      disabled: !!js "process.getuid?.() === 0"
     - id: client-ui-action-cards
       name: '@deepseek-ai/dsh-client-ui-action-cards'
+      disabled: !!js "process.getuid?.() === 0"
     - id: creation-recommendations
       name: '@deepseek-ai/dsh-creation-recommendations'
+      disabled: !!js "process.getuid?.() === 0"
     - id: client-ui-creation-recommendations
       name: '@deepseek-ai/dsh-client-ui-creation-recommendations'
+      disabled: !!js "process.getuid?.() === 0"
     - id: plugin-recommendations
       name: '@deepseek-ai/dsh-plugin-recommendations'
+      disabled: !!js "process.getuid?.() === 0"
     - id: client-ui-plugin-recommendations
       name: '@deepseek-ai/dsh-client-ui-plugin-recommendations'
+      disabled: !!js "process.getuid?.() === 0"
 
 
     - id: ui-workspace

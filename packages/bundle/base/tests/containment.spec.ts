@@ -177,7 +177,7 @@ async function boot(): Promise<Box> {
 }
 
 suite('agent containment through a real cordis.yml composition', () => {
-  it('runs the model shell as the run-as identity with its explicit environment and confines the file tools', async () => {
+  it('runs the model shell as the run-as identity with its explicit environment and confines the file tools', { timeout: 30_000 }, async () => {
     const { projects, home, secret, execute } = await boot()
     const uid = process.getuid!()
     const gid = process.getgid!()

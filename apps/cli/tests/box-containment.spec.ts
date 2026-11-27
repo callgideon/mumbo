@@ -7,12 +7,15 @@
  * server that names no identity must start as the dedicated `mcpserver` identity, never as root or `agent`, the
  * project box's `dsh-superagent` row is the founder's overlay row, read with the directories the start script exports,
  * `agent`'s PATH names only root's directories and its own npm global prefix and ~/.local/bin, and `web_fetch` goes
- * to the DeepSeek Fetch API at the edge's model host. The person box includes the door to Mumbo (`@mumbo/mcp`), whose
+ * to the DeepSeek Fetch API, and `web_search` to the DeepSeek Search API, at the edge's model host. Every listed package
+ * must exist in the workspace, every row new in an upstream release is off under root unless a ruling turns it on, no
+ * enabled row waits for a service only an off row registers, and the Web rows print one launch line with the token and
+ * serve nothing under `/pairing/`. The person box includes the door to Mumbo (`@mumbo/mcp`), whose
  * tools the edge calls for the person, Run Wild (`@mumbo/run-wild`), and the state block (`@mumbo/state`), which the
  * project overlay mounts in project boxes too.
  */
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -20,7 +23,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import type { ModuleLoaderV2 } from '@deepseek-ai/cordis-plugin-loader'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
-import { boot, composeEntries, loadOverlayPatches, loadProfile } from '@deepseek-ai/dsh-app-boot'
+import {
+  boot, composeEntries, loadOverlayPatches, loadProfile, readProfileDenyList, readProfileManifest, readProfilePatches, renderConfigDump,
+  resolveTelemetryPatch, writeProfileManifest,
+} from '@deepseek-ai/dsh-app-boot'
+import * as DeepSeekAuth from '@deepseek-ai/dsh-deepseek-auth'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import WebRuntime from '@deepseek-ai/dsh-web'
@@ -31,13 +38,6 @@ const root = resolve(import.meta.dirname, '../../..')
 const installAnchor = fileURLToPath(new URL('../package.json', import.meta.url))
 const deployed = (name: string) => loadOverlayPatches('dsh', join(root, 'deploy', name))
 const edge = (name: string) => loadOverlayPatches('dsh', join(import.meta.dirname, 'fixtures/box-edge', name))
-/** The overlay the edge patches into person boxes for the door to Mumbo. */
-const door = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/mcp/examples/person.overlay.yml'))
-/** The overlay the edge patches into person boxes for Run Wild. */
-const runWild = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/run-wild/examples/person.overlay.yml'))
-/** The overlay the edge patches into person boxes for the state block. */
-const state = () => loadOverlayPatches('dsh', join(root, 'packages/mumbo/state/examples/person.overlay.yml'))
-
 /** How a package's model-visible tools run in a contained box. */
 type Runs =
   /** Registers no model-visible tool. */
@@ -111,6 +111,9 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-cordis-client-runner': { ...NONE, note: 'the browser half of the Cordis runner' },
   '@deepseek-ai/dsh-cordis-host-runner': { ...NONE, note: 'browser-driven definitions only; no model tool creates them' },
   '@deepseek-ai/dsh-credentials-local': NONE,
+  '@deepseek-ai/dsh-deepseek-auth': {
+    ...NONE, note: 'orders the API key for DeepSeek requests; it goes only to the origin DEEPSEEK_BASE_URL names, the edge\'s model host',
+  },
   '@deepseek-ai/dsh-deepseek-llm-api-extensions': NONE,
   '@deepseek-ai/dsh-deliverable-file-references': NONE,
   '@deepseek-ai/dsh-file-reference-local': NONE,
@@ -119,6 +122,7 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-goal-round-driver': NONE,
   '@deepseek-ai/dsh-hmr': NONE,
   '@deepseek-ai/dsh-hooks-claude-code': { ...NONE, note: 'ruling #4: hook commands run through the shell, so as `agent`' },
+  '@deepseek-ai/dsh-host-authentication-token': { ...NONE, note: 'the launch token and owner cookie; prints the one `dsh web:` line the edge reads' },
   '@deepseek-ai/dsh-host-directory-picker-auto': NONE,
   '@deepseek-ai/dsh-host-open-in-app': {
     ...NONE, note: 'launches as root; under the run-as provider it resolves no PATH name, since agent may write agent\'s PATH',
@@ -150,8 +154,8 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
   '@deepseek-ai/dsh-permission-presets': NONE,
   '@deepseek-ai/dsh-persona': NONE,
   '@deepseek-ai/dsh-plan-mode': { runs: 'in-process', tools: ['exit_plan_mode'], catalog: '@deepseek-ai/dsh-plan-mode' },
-  '@deepseek-ai/dsh-plugin-manager': { ...NONE, note: 'the service; its model tool is the /tools row' },
-  '@deepseek-ai/dsh-plugin-manager/tools': { runs: 'withheld', tools: ['plugin_manager'], catalog: '@deepseek-ai/dsh-plugin-manager' },
+  '@deepseek-ai/dsh-plugin-manager/deny-list': { ...NONE, note: 'carries the deny list; registers nothing' },
+  '@deepseek-ai/dsh-plugin-manager': { ...NONE, note: 'the service; its model tool is the /tools row, which is forbidden' },
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': NONE,
   '@deepseek-ai/dsh-ptc-runtime-node': { ...NONE, note: 'the code runtime behind run_code and workflow; it starts through the run-as provider' },
   '@deepseek-ai/dsh-repeat-tool-reminder': NONE,
@@ -228,9 +232,6 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
     note: 'searches and fetches go to the DeepSeek Search and Fetch APIs through the edge\'s model host, never from the box to an address the model names',
   },
   '@deepseek-ai/dsh-tool-workflow': { runs: 'in-process', tools: ['workflow'], catalog: '@deepseek-ai/dsh-tool-workflow' },
-  '@deepseek-ai/dsh-tool-working-directory': {
-    runs: 'in-process', tools: ['working_directory'], catalog: '@deepseek-ai/dsh-tool-working-directory',
-  },
   '@deepseek-ai/dsh-tools': NONE,
   '@deepseek-ai/dsh-typert-loader': NONE,
   '@deepseek-ai/dsh-typert-registry': NONE,
@@ -275,16 +276,37 @@ const CLASSIFICATION: Readonly<Record<string, Classification>> = {
 }
 
 /**
- * Packages that load code into root dsh, start a root process for the model, or send root dsh's requests to any address
- * the model names, loopback and private ones included; no box may mount them.
+ * Packages no box may mount, each with the reason: they load code into root dsh, start a root process for the model, send
+ * root dsh's requests to any address the model names, loopback and private ones included, or are rows new in an upstream
+ * release that no ruling has turned on for boxes.
  */
-const FORBIDDEN = [
-  '@deepseek-ai/dsh-tool-cordis',
-  '@deepseek-ai/dsh-plugin-market/tools',
-  '@deepseek-ai/dsh-experimental-ptc-runtime-python',
-  '@deepseek-ai/dsh-subagent-dsh-sdk',
-  '@deepseek-ai/dsh-web-fetch-http',
-]
+const FORBIDDEN: Readonly<Record<string, string>> = {
+  '@deepseek-ai/dsh-tool-cordis': 'inspects the Host and loads code into root dsh',
+  '@deepseek-ai/dsh-plugin-market/tools': 'installs plugins, which loads code into root dsh',
+  '@deepseek-ai/dsh-plugin-manager/tools': 'installs and enables plugins, which loads code into root dsh; the manager also withholds the tool (`modelTools: false`)',
+  '@deepseek-ai/dsh-subagent-dsh-sdk': 'starts a child dsh as root under its own profile',
+  '@deepseek-ai/dsh-web-fetch-http': 'fetches from root dsh, outside the agent network rules',
+  '@deepseek-ai/dsh-client-remote-connection': 'its anonymous `/` and `/pairing/*` routes and owner-cookie Provider are a second way to become the owner',
+  '@deepseek-ai/dsh-tool-session-control': 'a member\'s turn could write into any other Session of a project box',
+  '@deepseek-ai/dsh-mcp-account': 'connector accounts sign in through an OAuth callback route on the box',
+  '@deepseek-ai/dsh-cli-account': 'starts vendor CLIs in dsh\'s own home directory, which fails under run-as',
+  '@deepseek-ai/dsh-client-ui-connector-account': 'the account sections of mcp-account and cli-account, which are off',
+  '@deepseek-ai/dsh-upstream-skills': 'downloads skill files for CLI app plugins, which no box mounts',
+  '@deepseek-ai/dsh-creation-recommendations': 'starts a subagent under the creator preset, whose tool-cordis is forbidden',
+  '@deepseek-ai/dsh-client-ui-creation-recommendations': 'the cards of creation-recommendations, which is off',
+  '@deepseek-ai/dsh-action-cards': 'its experimental predecessor was not mounted on boxes; only the recommendation rows use it',
+  '@deepseek-ai/dsh-client-ui-action-cards': 'its experimental predecessor was not mounted on boxes',
+  '@deepseek-ai/dsh-plugin-recommendations': 'its experimental predecessor was not mounted on boxes; its cards offer plugins to install',
+  '@deepseek-ai/dsh-client-ui-plugin-recommendations': 'its experimental predecessor was not mounted on boxes',
+  '@deepseek-ai/dsh-host-authentication-desktop': 'admits the desktop shell\'s window as the owner; a box has only the launch token',
+  '@deepseek-ai/dsh-session-persistence-sqlite': 'boxes stay on JSONL: the import is one-way (later events live only in SQLite, and the retained JSONL '
+    + 'cannot restore them) and backups do not cover `<root>/.segments/sessions.sqlite`',
+  '@deepseek-ai/dsh-deepseek-chat-import': 'parses an uploaded DeepSeek chat export in root dsh and stores it as Sessions; no ruling turns it on',
+  '@deepseek-ai/dsh-experimental-worktree': 'its Host operations move a Session to a directory the model influences, outside resolveModelPath',
+  '@deepseek-ai/dsh-experimental-tool-worktree': 'its tools ask the worktree Host operations for a directory the model names',
+  '@deepseek-ai/dsh-experimental-forge-bundle': 'the bundle that mounts the worktree and forge rows',
+  '@deepseek-ai/dsh-experimental-client-ui-forge': 'its panel continues a Session in a project the model influences, outside resolveModelPath',
+}
 
 interface Row { id?: string; name?: string; disabled?: unknown; inject?: unknown; config?: unknown }
 
@@ -322,7 +344,6 @@ const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'
   office_recalculate: 'asks',
   office_render: 'asks',
   plan_read: 'runs',
-  plugin_manager: 'asks',
   present: 'asks',
   read: 'runs',
   read_image: 'runs',
@@ -345,7 +366,6 @@ const REPORT_TURN: Readonly<Record<string, 'runs' | 'asks' | 'browser reads run'
   web_fetch: 'asks',
   web_search: 'asks',
   workflow: 'asks',
-  working_directory: 'asks',
   write: 'asks',
 }
 
@@ -354,17 +374,18 @@ const CONTAINMENT_ENV = { MUMBO_WORK_DIR: '/root/work', MUMBO_WORKER_DIR: '/var/
 
 /**
  * Evaluate `!!js` values in a row's field the way a contained Linux box boots it: dsh runs as root (uid 0), the launcher
- * supplies a profile context, `dshHomePath` names a path under root's DSH home, and `env` is the environment.
+ * supplies a profile context, `dshHomePath` names a path under root's DSH home, and `env` is the environment. Another
+ * `uid` evaluates the value for a dsh that does not run as root.
  */
-function evaluated(value: unknown, env: Record<string, string> = {}): unknown {
-  if (Array.isArray(value)) return value.map(entry => evaluated(entry, env))
+function evaluated(value: unknown, env: Record<string, string> = {}, uid = 0): unknown {
+  if (Array.isArray(value)) return value.map(entry => evaluated(entry, env, uid))
   if (typeof value !== 'object' || value === null) return value
-  if (!('__jsExpr' in value)) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, evaluated(entry, env)]))
+  if (!('__jsExpr' in value)) return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, evaluated(entry, env, uid)]))
   const context = { get: (name: string) => (name === 'profileContext' ? {} : undefined) }
   // The expressions are the repository's own composition files.
   // oxlint-disable-next-line typescript/no-implied-eval
   const evaluate = new Function('ctx', 'process', 'dshHomePath', `return (${String(value.__jsExpr)})`) as (ctx: unknown, process: unknown, home: unknown) => unknown
-  return evaluate(context, { platform: 'linux', env, getuid: () => 0 }, (name: string) => `/root/.dsh/${name}`)
+  return evaluate(context, { platform: 'linux', env, getuid: () => uid }, (name: string) => `/root/.dsh/${name}`)
 }
 
 /** Evaluate a row's `disabled` value the way a contained Linux box boots it. */
@@ -382,8 +403,26 @@ function enabledRows(rows: readonly Row[]): Row[] {
   })
 }
 
-/** The box's composed rows, with the edge's containment rows unless `contained` is false. */
-function compose(box: 'person' | 'project', contained = true): Row[] {
+/**
+ * The overlay files a box starts with after its bundles, in order: the founder's, the rows the edge writes, for a person
+ * box the overlays the edge patches in for the door to Mumbo, Run Wild and the state block, and the edge's containment
+ * rows last unless `contained` is false.
+ */
+function overlayPaths(box: 'person' | 'project', contained = true): string[] {
+  const fixture = (name: string) => join(import.meta.dirname, 'fixtures/box-edge', name)
+  return [
+    join(root, 'deploy/mumbo.overlay.yml'), join(root, 'deploy/mumbo-personal.overlay.yml'),
+    ...box === 'person'
+      ? [fixture('personal.overlay.yml'), ...['mcp', 'run-wild', 'state'].map(name => join(root, `packages/mumbo/${name}/examples/person.overlay.yml`))]
+      : [fixture('project.overlay.yml'), join(root, 'deploy/mumbo-project.overlay.yml')],
+    ...contained ? [fixture(`containment-${box}.overlay.yml`)] : [],
+  ]
+}
+
+/** The box's composed rows, with the edge's containment rows unless `contained` is false, and `bundles` as layers a person switched on. */
+function compose(
+  box: 'person' | 'project', contained = true, bundles: readonly ReturnType<typeof loadOverlayPatches>[] = [],
+): ReturnType<typeof composeEntries> {
   const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-'))
   try {
     const profile = loadProfile('dsh', 'web', installAnchor, home)
@@ -391,10 +430,8 @@ function compose(box: 'person' | 'project', contained = true): Row[] {
     const rows = composeEntries([
       ...profile.layers.map(layer => layer.patches),
       profile.patches,
-      deployed('mumbo.overlay.yml'),
-      deployed('mumbo-personal.overlay.yml'),
-      ...box === 'person' ? [edge('personal.overlay.yml'), door(), runWild(), state()] : [edge('project.overlay.yml'), deployed('mumbo-project.overlay.yml')],
-      ...contained ? [edge(`containment-${box}.overlay.yml`)] : [],
+      ...bundles,
+      ...overlayPaths(box, contained).map(path => loadOverlayPatches('dsh', path)),
     ], message => warnings.push(message))
     expect(warnings).toEqual([])
     return rows
@@ -403,7 +440,6 @@ function compose(box: 'person' | 'project', contained = true): Row[] {
   }
 }
 
-/** Every `identity` value in a row's config, at any depth: the subprocess identities the row's processes run as. */
 function namedIdentities(value: unknown): string[] {
   if (typeof value !== 'object' || value === null) return []
   return Object.entries(value).flatMap(([key, entry]) => key === 'identity' && typeof entry === 'string' ? [entry] : namedIdentities(entry))
@@ -523,6 +559,97 @@ function catalogTools(): Map<string, string[]> {
   return map
 }
 
+/** A workspace package: its directory and the subpaths its manifest exports. */
+interface WorkspacePackage { dir: string; exports: readonly string[] }
+
+/** Every workspace package under `vendor/` and `packages/<group>/`, by name. */
+function workspacePackages(): Map<string, WorkspacePackage> {
+  const packages = new Map<string, WorkspacePackage>()
+  const directories = (path: string) => readdirSync(path, { withFileTypes: true })
+    .filter(entry => entry.isDirectory()).map(entry => join(path, entry.name))
+  for (const dir of [join(root, 'vendor'), ...directories(join(root, 'packages'))].flatMap(directories)) {
+    const manifest = join(dir, 'package.json')
+    if (!existsSync(manifest)) continue
+    const { name, exports } = JSON.parse(readFileSync(manifest, 'utf8')) as { name: string; exports?: unknown }
+    packages.set(name, { dir, exports: typeof exports === 'object' && exports !== null ? Object.keys(exports) : ['.'] })
+  }
+  return packages
+}
+
+/** The package and export subpath a row name or a list entry names, such as `@deepseek-ai/dsh-plugin-market/tools`. */
+function specifier(name: string): { packageName: string; subpath: string } {
+  const [scope, base, ...rest] = name.split('/')
+  return { packageName: `${scope!}/${base!}`, subpath: rest.length === 0 ? '.' : `./${rest.join('/')}` }
+}
+
+/** Whether `name` is a workspace package, or a subpath one exports. */
+function resolvesInWorkspace(name: string, packages: ReadonlyMap<string, WorkspacePackage>): boolean {
+  const { packageName, subpath } = specifier(name)
+  return packages.get(packageName)?.exports.includes(subpath) === true
+}
+
+/** Every row at any depth, groups and agent presets included, with whether it or a row above it is off on a box. */
+function allRows(rows: readonly Row[], above = false): { row: Row; off: boolean }[] {
+  return rows.flatMap((row) => {
+    const off = above || isDisabled(row.disabled)
+    const children = row.name === 'cordis:group' && Array.isArray(row.config) ? row.config as Row[]
+      : row.name === '@deepseek-ai/dsh-agent-preset' ? (row.config as { plugins: Row[] }).plugins : []
+    return [{ row, off }, ...allRows(children, off)]
+  })
+}
+
+/** Every `.ts` and `.tsx` source text under a package's `src`. */
+function sources(dir: string): string[] {
+  const src = join(dir, 'src')
+  if (!existsSync(src)) return []
+  return readdirSync(src, { recursive: true, encoding: 'utf8' }).filter(file => /\.tsx?$/u.test(file)).map(file => readFileSync(join(src, file), 'utf8'))
+}
+
+/** Service names a package's sources register: a Service constructor's name, or a `provide` or `set` call's. */
+function providedServices(dir: string): string[] {
+  return sources(dir).flatMap(text => [...text.matchAll(/(?:super\(\s*\w+,|\.(?:provide|set)\()\s*'([\w.]+)'/gu)].map(match => match[1]!))
+}
+
+/** Service names a package's sources declare in a plugin's static `inject` list. */
+function injectedServices(dir: string): string[] {
+  return sources(dir).flatMap(text => [...text.matchAll(/\binject(?::[^=\n]+)?\s*=\s*\[([^\]]*)\]/gu)]
+    .flatMap(match => [...match[1]!.matchAll(/'([\w.]+)'/gu)].map(name => name[1]!)))
+}
+
+/** The rows new since upstream 0.2.3-alpha.2 that are off on a box, by id; each package is in {@link FORBIDDEN}. */
+const OFF_ROWS = [
+  'cli-account', 'upstream-skills', 'tool-session-control', 'mcp-account', 'remote-connection', 'ui-connector-account', 'action-cards',
+  'client-ui-action-cards', 'creation-recommendations', 'client-ui-creation-recommendations', 'plugin-recommendations', 'client-ui-plugin-recommendations',
+]
+
+/**
+ * What the base bundle's `plugin-deny-list` row denies where dsh runs as root: the optional bundles that mount a
+ * {@link FORBIDDEN} package, and the {@link OFF_ROWS} that nobody may switch on.
+ */
+const DENY_LIST = {
+  bundles: ['@deepseek-ai/dsh-experimental-forge-bundle', '@deepseek-ai/dsh-experimental-tool-worktree', '@deepseek-ai/dsh-deepseek-chat-import'],
+  rows: ['remote-connection', 'cli-account', 'upstream-skills'],
+}
+
+/** The rows new since upstream 0.2.3-alpha.2 that are on in a box, by id. */
+const ON_ROWS = ['deepseek-auth', 'authentication-token', 'ui-session-status', 'ui-session-panel']
+
+describe('the containment lists', () => {
+  it('name only workspace packages and the subpaths they export', () => {
+    const packages = workspacePackages()
+    // A renamed or deleted package would otherwise leave its entry matching no row, and the gate would pass without it.
+    expect([...Object.keys(CLASSIFICATION), ...Object.keys(FORBIDDEN)].filter(name => !resolvesInWorkspace(name, packages))).toEqual([])
+    expect(Object.keys(CLASSIFICATION).filter(name => name in FORBIDDEN)).toEqual([])
+  })
+
+  it('finds a box with the telemetry switch set by its image and by its start script', () => {
+    const SWITCH = /\bDSH_TELEMETRY_DISABLED=1\b/u
+    for (const file of ['deploy/Dockerfile', 'deploy/boxes/edge/edge.mjs', 'deploy/boxes/trial/box.mjs']) {
+      expect(readFileSync(join(root, file), 'utf8'), file).toMatch(SWITCH)
+    }
+  })
+})
+
 describe.each(['person', 'project'] as const)('the %s box composition', (box) => {
   const rows = compose(box)
   const enabled = enabledRows(rows)
@@ -540,8 +667,8 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
   })
 
   it('mounts none of the packages that would load code into root dsh or start a root process for the model', () => {
-    expect(names.filter(name => FORBIDDEN.includes(name))).toEqual([])
-    // The Office tools, previews and skills are on; office-kit converts as the run-as identity.
+    expect(names.filter(name => name in FORBIDDEN)).toEqual([])
+    // The Office tools, previews and skill are on; office-kit converts as the run-as identity.
     expect(names).toEqual(expect.arrayContaining(['@deepseek-ai/dsh-office-kit', '@deepseek-ai/dsh-skill-office', '@deepseek-ai/dsh-tool-office']))
   })
 
@@ -605,6 +732,14 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       expect(byId('computer-use-x11')?.inject).toEqual(['mumbo-browser-consent'])
     }
     expect(byId('plugin-manager')?.config).toEqual({ modelTools: false })
+    // A patch replaces a row's whole config, so no overlay of a box may patch the row that carries the deny list.
+    expect(overlayPaths(box).filter(path => loadOverlayPatches('dsh', path).some(patch => JSON.stringify(patch).includes('"plugin-deny-list"')))).toEqual([])
+    // A config patch of a preset would replace its whole plugin list, and with it the root switches on tool-cordis and tool-plugin-manager.
+    const presetPatches = overlayPaths(box).filter(path => (loadOverlayPatches('dsh', path) as Row[])
+      .some(patch => (patch.id === 'preset-standard' || patch.id === 'preset-ptc') && 'config' in patch))
+    expect(presetPatches).toEqual([])
+    expect(evaluated(byId('plugin-deny-list')?.config)).toEqual(DENY_LIST)
+    expect(evaluated(byId('plugin-deny-list')?.config, {}, 1000)).toEqual({ bundles: [], rows: [] })
     expect(byId('workspace-changes')?.config).toEqual({ summaries: false })
     expect(isDisabled(byId('preset-cordis')?.disabled)).toBe(true)
   })
@@ -679,6 +814,181 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     }
   })
 
+  it('keeps each row new in upstream 0.2.3-alpha.2 off unless a ruling turns it on', () => {
+    const byId = (id: string) => rows.find(row => row.id === id)
+    for (const id of OFF_ROWS) {
+      expect(byId(id), id).toBeDefined()
+      expect(isDisabled(byId(id)?.disabled), id).toBe(true)
+      expect(FORBIDDEN, id).toHaveProperty([byId(id)!.name])
+    }
+    for (const id of ON_ROWS) expect(isDisabled(byId(id)?.disabled), id).toBe(false)
+    // The connector accounts and the creator tools are off together: neither mcp-account nor any tool-cordis row runs.
+    const cordis = allRows(rows).filter(({ row }) => row.name === '@deepseek-ai/dsh-tool-cordis')
+    expect(cordis.length).toBeGreaterThan(0)
+    expect([isDisabled(byId('mcp-account')?.disabled), ...cordis.map(({ off }) => off)]).not.toContain(false)
+    // The founder's overlay still switches the DeepSeek account off by its row id.
+    expect(byId('deepseek-account')?.name).toBe('@deepseek-ai/dsh-deepseek-account')
+    expect(deployed('mumbo.overlay.yml')).toContainEqual({ id: 'deepseek-account', disabled: true })
+    expect(isDisabled(byId('deepseek-account')?.disabled)).toBe(true)
+    // The launcher switches session telemetry off for the variable the box sets.
+    expect(resolveTelemetryPatch('1', byId('session-telemetry-otel') !== undefined)).toEqual({ id: 'session-telemetry-otel', disabled: true })
+  })
+
+  it('mounts no worktree or forge row, in any state', () => {
+    const packages = workspacePackages()
+    const bundled = ['@deepseek-ai/dsh-experimental-forge-bundle', '@deepseek-ai/dsh-experimental-tool-worktree'].flatMap((bundle) => {
+      const patches = loadOverlayPatches('dsh', join(packages.get(bundle)!.dir, 'cordis.patch.yml')) as { insert?: Row[] }[]
+      return patches.flatMap(patch => patch.insert ?? [])
+    })
+    expect(bundled.map(row => row.id)).toEqual(expect.arrayContaining(['worktree', 'tool-worktree', 'forge-panel']))
+    const mounted = allRows(rows).map(({ row }) => row)
+    const fromBundle = (row: Row) => bundled.some(candidate => candidate.id === row.id || candidate.name === row.name)
+    expect(mounted.filter(fromBundle).map(row => row.id)).toEqual([])
+  })
+
+  it('names only modules the workspace resolves, and leaves no enabled row waiting for a service of a row that is off', () => {
+    const packages = workspacePackages()
+    const every = allRows(rows).filter(({ row }) => row.name !== undefined && !row.name.startsWith('cordis:'))
+    expect(every.filter(({ row, off }) => !off && !resolvesInWorkspace(row.name!, packages)).map(({ row }) => row.name)).toEqual([])
+    const directory = (row: Row) => packages.get(specifier(row.name!).packageName)!.dir
+    const on = every.filter(({ off }) => !off).map(({ row }) => row)
+    const kept = new Set(on.map(directory).flatMap(providedServices))
+    const withheld = new Set(every.filter(({ off, row }) => off && resolvesInWorkspace(row.name!, packages))
+      .flatMap(({ row }) => providedServices(directory(row))).filter(service => !kept.has(service)))
+    // The scan reads the services the off rows register: the ones the rulings name must be among them.
+    expect([...withheld]).toEqual(expect.arrayContaining(['actionCards', 'cliAccounts', 'connectorAccounts', 'mcpAccounts', 'upstreamSkills']))
+    const waiting = on.flatMap((row) => {
+      const needs = [...Array.isArray(row.inject) ? row.inject as string[] : [], ...injectedServices(directory(row))]
+      return needs.filter(service => withheld.has(service)).map(service => `${row.id!} waits for ${service}`)
+    })
+    expect(waiting).toEqual([])
+  })
+
+  it('denies every installed optional bundle that would mount a forbidden package', async () => {
+    const packages = workspacePackages()
+    // The package is not a dependency of this app; its source is loaded from the repository.
+    const bundles = pathToFileURL(join(root, 'packages/util/official-bundles/src/bundles.ts')).href
+    const { OPTIONAL_BUNDLES } = await import(bundles) as { OPTIONAL_BUNDLES: readonly string[] }
+    const installed = JSON.parse(readFileSync(installAnchor, 'utf8')) as { dependencies: Record<string, string> }
+    const { bundles: deniedBundles } = evaluated(rows.find(row => row.id === 'plugin-deny-list')?.config) as typeof DENY_LIST
+    const mountsForbidden: string[] = []
+    for (const bundle of OPTIONAL_BUNDLES.filter(name => name in installed.dependencies)) {
+      const { dir } = packages.get(bundle)!
+      const { patch } = (JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { dsh: { bundle: { patch: string | string[] } } }).dsh.bundle
+      const layer = [patch].flat().flatMap(file => loadOverlayPatches('dsh', join(dir, file)))
+      const mounted = enabledRows(compose(box, true, [layer])).map(row => row.name)
+      if (bundle in FORBIDDEN || mounted.some(name => name !== undefined && name in FORBIDDEN)) mountsForbidden.push(bundle)
+    }
+    // Profile composition and the plugin manager both read this list: a listed bundle contributes no rows and cannot be enabled.
+    expect(mountsForbidden.filter(bundle => !deniedBundles.includes(bundle))).toEqual([])
+    expect([...deniedBundles].sort()).toEqual([...mountsForbidden].sort())
+  })
+
+  it('denies the rows that nobody may switch on, each off in the box and forbidden', () => {
+    const { rows: deniedRows } = evaluated(rows.find(row => row.id === 'plugin-deny-list')?.config) as typeof DENY_LIST
+    expect([...deniedRows].sort()).toEqual([...DENY_LIST.rows].sort())
+    for (const id of deniedRows) {
+      const row = rows.find(candidate => candidate.id === id)
+      expect(OFF_ROWS, id).toContain(id)
+      expect(isDisabled(row?.disabled), id).toBe(true)
+      expect(FORBIDDEN, id).toHaveProperty([row!.name])
+    }
+  })
+
+  it('keeps the deny list and the root switches in effect under the edge\'s own rows, in a profile that already enables a listed bundle and row', () => {
+    const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-'))
+    onTestFinished(() => { rmSync(home, { recursive: true, force: true }) })
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(0)
+    onTestFinished(() => { getuid.mockRestore() })
+    const profile = loadProfile('dsh', 'web', installAnchor, home)
+    const manifest = readProfileManifest('dsh', profile.dir)
+    const selected = manifest.dsh!.profile!.bundles!
+    manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: [...selected, '@deepseek-ai/dsh-experimental-forge-bundle'] } }
+    writeProfileManifest(profile.dir, manifest)
+    // What `setPluginEnabled` writes, and an edge-style config patch of two rows the bundles switch off under root.
+    writeFileSync(profile.patchPath, '- id: remote-connection\n  disabled: false\n- id: mcp-account\n  disabled: false\n')
+    const hazard = join(home, 'config-patch.overlay.yml')
+    writeFileSync(hazard, '- id: remote-connection\n  config: {}\n- id: cli-account\n  config: {}\n')
+    const context = {
+      name: 'web', dir: profile.dir, patchPath: profile.patchPath, installAnchor, home, cwd: home, telemetryDisabledEnv: undefined,
+      startedBundles: [...selected, '@deepseek-ai/dsh-experimental-forge-bundle'], overlayPaths: [...overlayPaths(box), hazard],
+    }
+    // The edge's own `plugin-manager` row is among the overlays and does not reach the list.
+    expect(loadOverlayPatches('dsh', overlayPaths(box).at(-1)!)).toContainEqual({ id: 'plugin-manager', config: { modelTools: false } })
+    expect(readProfileDenyList('dsh', context)).toEqual({ ...DENY_LIST, dropped: ['@deepseek-ai/dsh-experimental-forge-bundle', 'remote-connection'] })
+    const composed = composeEntries([readProfilePatches('dsh', context)]) as Row[]
+    expect(composed.find(row => row.id === 'plugin-manager')?.config).toEqual({ modelTools: false })
+    expect(composed.filter(row => ['worktree', 'tool-worktree', 'forge', 'forge-panel'].includes(row.id!)).map(row => row.id)).toEqual([])
+    // The entry-level switch is not part of `config`, so a config patch of the same row leaves it.
+    for (const id of ['remote-connection', 'cli-account']) {
+      const row = composed.find(candidate => candidate.id === id)
+      expect(row?.config, id).toEqual({})
+      expect(row?.disabled, id).toEqual({ __jsExpr: 'process.getuid?.() === 0' })
+      expect(isDisabled(row?.disabled), id).toBe(true)
+    }
+    // A row that is off by default only is the owner's to switch on.
+    expect(composed.find(row => row.id === 'mcp-account')?.disabled).toBe(false)
+    // A dsh that does not run as root reads an empty list and keeps the profile's own choices.
+    getuid.mockReturnValue(1000)
+    expect(readProfileDenyList('dsh', context)).toEqual({ bundles: [], rows: [], dropped: [] })
+    const desktop = composeEntries([readProfilePatches('dsh', context)]) as Row[]
+    expect(desktop.find(row => row.id === 'remote-connection')?.disabled).toBe(false)
+    expect(desktop.map(row => row.id)).toEqual(expect.arrayContaining(['worktree', 'forge-panel']))
+  })
+
+  it('prints one launch line with the token, and serves nothing under /pairing/', { timeout: 60_000 }, async () => {
+    // The box's own rows for the Web listener, sign-in and entry line, in the real Loader, each off where a root dsh has
+    // it off, started with the flags the edge's start script passes.
+    const WEB = ['credentials', 'web-startup', 'webserver', 'web-runtime', 'connection', 'authentication-token', 'remote-connection']
+    const served = async (remoteConnection: boolean): Promise<{ printed: string[]; pairing: number[] }> => {
+      const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-entry-'))
+      vi.stubEnv('DSH_HOME', home)
+      writeFileSync(join(home, 'index.html'), '<!doctype html><title>dsh</title>')
+      const web = await import('@deepseek-ai/dsh-web-app')
+      vi.spyOn(web.internals, 'resolveDistIndex').mockReturnValue(join(home, 'index.html'))
+      const printed: string[] = []
+      vi.spyOn(console, 'log').mockImplementation((line: string) => { printed.push(line) })
+      const selected = WEB.map(id => rows.find(row => row.id === id)!)
+        .map(row => ({ ...row, disabled: row.id === 'remote-connection' ? !remoteConnection : isDisabled(row.disabled) }))
+      writeFileSync(join(home, 'base.yml'), '[]\n')
+      const config = join(home, 'cordis.yml')
+      writeFileSync(config, renderConfigDump('dsh', join(home, 'base.yml'), [{ label: 'box', patches: [{ insert: selected }] }], () => {}))
+      const ctx: Context = await boot('box-containment-entry', config, [], (host) => {
+        host.loader.internal = {
+          version: 'v2', loadCache: new Map(),
+          import(specifier) { return import(/* @vite-ignore */ specifier) },
+          register(): never { throw new Error('Unexpected module hook registration') },
+          getOrCreateModuleJob(): never { throw new Error('Unexpected module job creation') },
+          resolveSync(): never { throw new Error('Unexpected synchronous module resolution') },
+          load(): never { throw new Error('Unexpected module load') },
+        } satisfies ModuleLoaderV2
+        host.provide('launchEnvironment', createLaunchEnvironmentSnapshot([]))
+        const flags = ['--no-open', '--host', '127.0.0.1', '--port', '0', '--public-url', 'https://app.example/', '--trusted-host', 'app.example']
+        host.provide('cmdlineArgs', { get: () => flags })
+        host.provide('appExit', () => { throw new Error('Unexpected exit request') })
+      })
+      try {
+        await vi.waitFor(() => { expect(printed.length).toBeGreaterThan(0) })
+        const origin = `http://127.0.0.1:${String(ctx.webServer.port)}`
+        const status = async (path: string) => (await fetch(`${origin}${path}`, { redirect: 'manual' })).status
+        return { printed, pairing: [await status('/pairing/'), await status('/pairing/client.js')] }
+      } finally {
+        await ctx.fiber.dispose()
+        vi.restoreAllMocks()
+        vi.unstubAllEnvs()
+        rmSync(home, { recursive: true, force: true })
+      }
+    }
+    const { printed, pairing } = await served(false)
+    // The edge reads the token with `grep -o 'token=[A-Za-z0-9_-]*' /root/dsh.log | tail -1`.
+    const lines = printed.filter(line => line.includes('token='))
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/^dsh web: https:\/\/app\.example\/\?token=[A-Za-z0-9_-]+$/u)
+    expect(pairing.filter(status => status !== 401 && status !== 404)).toEqual([])
+    // The check itself: with the remote-connection row on, as for a non-root dsh, the pairing page's script is served.
+    expect((await served(true)).pairing[1]).toBe(200)
+  })
+
   it.runIf(box === 'project')('lists every orchestrator tool the superagent registers, and reads its directories from the start script\'s variables', async () => {
     const registered = await superagentTools()
     expect(CLASSIFICATION['@mumbo/superagent']!.tools).toEqual(registered)
@@ -701,15 +1011,17 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     // The edge's model host, which the sandboxes server's URL names.
     const host = new URL((byId(rows, 'mcp-sandboxes')?.config as { url: string }).url).origin
     expect(isDisabled(byId(rows, 'web-fetch-http')?.disabled)).toBe(true)
-    // The containment rows change only the fetch provider of the base's `web` row, whose search provider they restate.
-    expect(byId(rows, 'web')?.config).toEqual({ ...byId(compose(box, false), 'web')?.config as object, fetchProvider: 'deepseek-fetch-api' })
+    // The base pins only its anonymous fetcher and leaves search to the model route; the containment rows pin both, so a
+    // search uses the DeepSeek Search API on every model route.
+    expect(byId(compose(box, false), 'web')?.config).toEqual({ fetchProvider: 'http' })
+    expect(byId(rows, 'web')?.config).toEqual({ searchProvider: 'deepseek-search-api', fetchProvider: 'deepseek-fetch-api' })
     expect(byId(rows, 'web-deepseek-api')?.config).toEqual({ fetchBaseURL: `${host}/v1/tools` })
 
     // The composed rows in the real Loader: the box token goes only to the edge, whatever URL the model fetches.
     const sent: Array<{ endpoint: string; authorization: string | null; body: unknown }> = []
     vi.stubGlobal('fetch', vi.fn((endpoint: string, init?: RequestInit) => {
       sent.push({ endpoint, authorization: new Headers(init?.headers).get('authorization'), body: JSON.parse(init?.body as string) })
-      return Promise.resolve(Response.json({ content: '# Page' }))
+      return Promise.resolve(Response.json(endpoint.endsWith('/search') ? { results: [] } : { content: '# Page' }))
     }))
     const home = mkdtempSync(join(tmpdir(), 'dsh-box-containment-web-'))
     onTestFinished(() => {
@@ -717,9 +1029,10 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
       rmSync(home, { recursive: true, force: true })
     })
     const config = join(home, 'cordis.yml')
-    writeFileSync(config, JSON.stringify(['web', 'web-deepseek-api', 'web-fetch-http'].map(id => byId(rows, id))))
+    writeFileSync(config, JSON.stringify(['deepseek-auth', 'web', 'web-deepseek-api', 'web-fetch-http'].map(id => byId(rows, id))))
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-web', WebRuntime], ['@deepseek-ai/dsh-web-deepseek-api', WebDeepseekApi], ['@deepseek-ai/dsh-web-fetch-http', WebFetchHttp],
+      ['@deepseek-ai/dsh-deepseek-auth', DeepSeekAuth], ['@deepseek-ai/dsh-web', WebRuntime], ['@deepseek-ai/dsh-web-deepseek-api', WebDeepseekApi],
+      ['@deepseek-ai/dsh-web-fetch-http', WebFetchHttp],
     ])
     const ctx: Context = await boot('box-containment-web', config, [], (host) => {
       host.loader.internal = {
@@ -736,6 +1049,16 @@ describe.each(['person', 'project'] as const)('the %s box composition', (box) =>
     expect(ctx.web.listProviders().fetch.map(provider => provider.id)).toEqual(['deepseek-fetch-api'])
     await ctx.web.fetch({ url: 'http://127.0.0.1:9222/json/list' })
     expect(sent).toEqual([{ endpoint: `${host}/v1/tools/fetch`, authorization: 'Bearer box-token', body: expect.objectContaining({ url: 'http://127.0.0.1:9222/json/list' }) as object }])
+
+    // A search goes to the same host on both model routes. The API-key route (`llm-deepseek`) connects the deployment
+    // DEEPSEEK_BASE_URL names, which the box's start script points at the edge; this stands in for that row.
+    ctx.effect(() => ctx.deepseekAuth.connect('api-key', 'deepseek-official', () => ({ baseURL: `${host}/anthropic` })), 'box-containment: API-key deployment')
+    expect(ctx.web.listProviders().search.map(provider => provider.id)).toEqual(['deepseek-search-api'])
+    sent.length = 0
+    for (const llmProvider of ['deepseek-official', 'openrouter']) await ctx.web.search({ query: 'mumbo', llmProvider })
+    expect(sent.map(({ endpoint, authorization }) => ({ endpoint, authorization }))).toEqual([
+      { endpoint: `${host}/v1/tools/search`, authorization: 'Bearer box-token' }, { endpoint: `${host}/v1/tools/search`, authorization: 'Bearer box-token' },
+    ])
   })
 
   it.runIf(box === 'person')('classifies every model tool for turns a project\'s report started', async () => {

@@ -16,6 +16,9 @@
   disabled: true
 - id: product-analytics
   disabled: true
+# No feedback upload of Session logs to DeepSeek's collector (dsh-otel-collector.deepseeksvc.com).
+- id: session-telemetry-otel
+  disabled: true
 # No session-log upload to DeepSeek on model requests.
 - id: session-log-deepseek
   disabled: true
