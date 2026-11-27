@@ -2779,7 +2779,7 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Waiting for the merged image on real boxes: the member checks, a real model turn, and the stdio MCP server's user.</li>
 </ul>
 </li>
-<li><strong>Approved at 487d2d5875</strong> [2026-11-27], pending CI on that head, which differs from the green 860e12c94f only by snapshot files and one comment line.
+<li><strong>Approved at 487d2d5875</strong> [2026-11-27]. mumbo-ci is green on that head (static and both unit shards), and the PR is mergeable against main a3edaa5799.
 <ul>
 <li>mumbo-ci was green on 860e12c94f, <code>build:check</code> passes, and the snapshot suite reads 304 passed and 17 failed, every failure being the test host's missing sandbox backend.</li>
 <li>The seven fork cases were refreshed by replay, without the key. Recorded model responses are unchanged in content; message id placeholders and one case's stream timestamps moved.</li>
