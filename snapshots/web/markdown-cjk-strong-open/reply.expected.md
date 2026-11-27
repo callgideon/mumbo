@@ -1,0 +1,18 @@
+- paragraph:
+  - text: 땀폹
+  - strong: “흓뗦쌴헲쬫낓쥥멍쎽썼（흻횕눉낖）뉒신늅낖냗횦”
+  - text: ，깭뒔폹욆
+  - code: bluetoothd
+  - text: 신뉁갳：촤뉊찎있였락껇뀫룽덥챽옭。
+- paragraph:
+  - text: 낑폼칐욆
+  - strong: “Wi-Fi 옋높옍쨰뀄낹”
+  - text: 신쀌괙，웥쯊쬅찫
+  - strong: （즅펹）
+  - text: 신쨗퓄놵쨷옍짺돁。
+- paragraph:
+  - text: 꾾쯥겕견，뚦륐짺켨
+  - strong: 「멍쎽썼」
+  - text: 뛮렑，챨옍늋
+  - strong: “눅폹릝왧”
+  - text: 뎈꽣。

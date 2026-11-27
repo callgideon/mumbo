@@ -1,6 +1,6 @@
 - group "Model and reasoning effort":
   - menu "Model":
-    - group "DeepSeek":
-      - text: DeepSeek
+    - group "DeepSeek API":
+      - text: DeepSeek API
       - menuitemradio "Messages Flash" [checked]
       - menuitemradio "DeepSeek-V4-Pro"

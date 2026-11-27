@@ -23,6 +23,8 @@ Open a Session’s directory through **Open in** in its Header More menu or its 
 <a id="use-this-package"></a>
 ## Use this package
 
+The compact split control is 24px high inside the document toolbar’s 28px control row, with 24px minimum segment widths; the labeled large variant keeps the standard control geometry.
+
 Mount this plugin in the Web composition beside [`dsh-host-open-in-app`](../../host/open-in-app/README.md); this row takes no config. A known Session directory and at least one installed, localized catalog application enable its Open in submenu. The document preview of [`ui-sidebar-documentpreview`](../ui-sidebar-documentpreview/README.md) shows file controls when the Host reports a desktop through `session.canOpenWorkspacePath`; removing this row removes all its controls and menu contributions.
 
 The HTTP open-in-app routes for the application probe, icons, and launch sit outside the Gateway and answer only the owner, so no access answer names them. The plugin uses `session/openWorkspacePath`, the Remote action that opens a Host path in a Host application, as their proxy: a page whose Peer may not call it, such as a project member's, probes no applications, reads no desktop or file associations, and offers no opener.

@@ -1,4 +1,0 @@
-- listitem:
-  - button "tool-subagent, Enabled":
-    - strong: tool-subagent
-    - text: Model-facing subagent delegation tool over the ctx.subagents seam

@@ -10,7 +10,9 @@ const ALLOWED_HOSTS = new Set(['api.deepseek.com'])
 // Reviewed defaults: deploy/mumbo.overlay.yml disables the row, and deploy/mumbo-desktop.overlay.yml points each origin
 // at the mumbo gateway (apps/cli/tests/desktop-overlay.spec.ts). A new host in this file fails again.
 const ALLOWED_IN_FILE: Record<string, string[]> = {
-  'packages/credentials/deepseek-account/src/index.ts': ['platform.deepseek.com', 'harness.deepseek.com'],
+  'packages/account/deepseek-account/src/index.ts': ['platform.deepseek.com', 'harness.deepseek.com'],
+  // Module comment naming where the imported export file comes from; the plugin contacts no host.
+  'packages/experimental/deepseek-chat-import/src/index.ts': ['chat.deepseek.com'],
 }
 // Disabled by deploy/mumbo.overlay.yml or rewritten by scripts/mumbo-rebrand.ts, or docs-only strings.
 const ALLOWED_FILES = [

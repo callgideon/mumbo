@@ -4,7 +4,8 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
-import { FileSystem, FsError, FsVersion, type FsDirEntry, type FsEditOutcome, type FsEditRequest, type FsInfo, type FsPathInfo, type FsTarget, type FsWriteOutcome } from '@deepseek-ai/dsh-fs'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { FileSystem, FsError, type FsVersion, type FsDirEntry, type FsEditOutcome, type FsEditRequest, type FsInfo, type FsPathInfo, type FsTarget, type FsWriteOutcome } from '@deepseek-ai/dsh-fs'
 import * as SkillFileSystem from '../src/index.ts'
 
 /** Every temp dir created by this file, removed after each test. */
@@ -75,7 +76,7 @@ class TestFileSystem extends FileSystem {
       const fs = await import('node:fs/promises')
       const info = await fs.stat(target.displayPath)
       return {
-        version: FsVersion(String(info.mtimeMs)),
+        version: brandString<FsVersion>(String(info.mtimeMs)),
         type: info.isFile() ? 'file' : info.isDirectory() ? 'directory' : 'other',
         size: info.size,
       }
@@ -89,7 +90,7 @@ class TestFileSystem extends FileSystem {
       const fs = await import('node:fs/promises')
       const info = await fs.lstat(path)
       return {
-        version: FsVersion(String(info.mtimeMs)),
+        version: brandString<FsVersion>(String(info.mtimeMs)),
         type: info.isSymbolicLink() ? 'symlink' : info.isFile() ? 'file' : info.isDirectory() ? 'directory' : 'other',
         size: info.size,
       }
@@ -140,7 +141,7 @@ class TestFileSystem extends FileSystem {
         name: entry.name,
         type,
         target: { targetKey: childPath as never, displayPath: childPath },
-        version: FsVersion('test'),
+        version: brandString<FsVersion>('test'),
         ...(size !== undefined ? { size } : {}),
       })
     }
@@ -150,7 +151,7 @@ class TestFileSystem extends FileSystem {
   override async writeText(target: FsTarget, content: string): Promise<FsWriteOutcome> {
     await mkdir(dirname(target.displayPath), { recursive: true })
     await writeFile(target.displayPath, content)
-    return { operation: 'create', version: FsVersion('test'), before: null, after: content }
+    return { operation: 'create', version: brandString<FsVersion>('test'), before: null, after: content }
   }
 
   override async editText(_target: FsTarget, _request: FsEditRequest): Promise<FsEditOutcome> {
@@ -223,6 +224,19 @@ describe('FileSystemSkillProvider', () => {
     const noGit = await tempDir('skill-no-git')
     await writeSkill(join(noGit, '.dsh/skills'), 'fallback-root', 'Fallback root')
     expect((await ctx.skills.list({ cwd: noGit })).map(skill => skill.name)).toContain('fallback-root')
+  })
+
+  it('reports an unreadable trusted-host skill file as SKILL_READ_FAILED', async () => {
+    const home = await tempDir('skill-unreadable-home')
+    const bundled = await tempDir('skill-unreadable-bundled')
+    await writeSkill(bundled, 'bundled-only', 'bundled skill')
+    const ctx = await setupLocal(home, { bundledSkillDir: bundled })
+    expect((await ctx.skills.list()).map(skill => skill.name)).toEqual(['bundled-only'])
+    const file = join(bundled, 'bundled-only/SKILL.md')
+    await rm(file)
+    await mkdir(file)
+    const failure = ctx.skills.get('bundled-only')
+    await expect(failure).rejects.toMatchObject({ name: 'SkillError', code: 'SKILL_READ_FAILED', cause: { code: 'EISDIR' } })
   })
 
   it('lets project skills override runtime while runtime overrides custom and user skills', async () => {
@@ -498,7 +512,7 @@ describe('FileSystemSkillProvider', () => {
     fs.failResolvePaths.add(join(nestedCwd, '.git'))
     fs.failStatPaths.add(join(project, 'packages/.git'))
     fs.statOverrides.set(join(project, '.git'), {
-      version: FsVersion('virtual-git'),
+      version: brandString<FsVersion>('virtual-git'),
       type: 'directory',
       size: 0,
     })
@@ -621,7 +635,7 @@ describe('FileSystemSkillProvider', () => {
     ctx.emit(
       'fs/observed',
       { targetKey: path as never, displayPath: path },
-      { kind: 'present', version: FsVersion('failed-read') },
+      { kind: 'present', version: brandString<FsVersion>('failed-read') },
       { name: 'edit' },
     )
     expect(await ctx.skills.snapshot()).toEqual({ skills: [], complete: false })
@@ -680,7 +694,7 @@ describe('FileSystemSkillProvider', () => {
       ctx.emit(
         'fs/observed',
         { targetKey: path as never, displayPath: path },
-        { kind: 'present', version: FsVersion('entry-failure') },
+        { kind: 'present', version: brandString<FsVersion>('entry-failure') },
         { name: 'write' },
       )
     }
@@ -829,7 +843,7 @@ describe('FileSystemSkillProvider', () => {
       ctx.emit(
         'fs/observed',
         { targetKey: displayPath as never, displayPath },
-        { kind: 'present', version: FsVersion('observed') },
+        { kind: 'present', version: brandString<FsVersion>('observed') },
         actor,
       )
     }
@@ -844,7 +858,7 @@ describe('FileSystemSkillProvider', () => {
     ctx.emit(
       'fs/observed',
       { targetKey: path as never, displayPath: path },
-      { kind: 'present', version: FsVersion('observed') },
+      { kind: 'present', version: brandString<FsVersion>('observed') },
       { name: 'edit' },
     )
 

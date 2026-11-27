@@ -1,6 +1,7 @@
 - banner:
   - navigation "Session hierarchy": Reply only with MESSAGES_WEB_READY and
   - text: Standard mode
+  - button "Session panel"
   - button "More actions"
   - button "Open right sidebar"
   - tablist:

@@ -26,7 +26,6 @@ export interface UnitExclusion {
 
 /** The unit job's exclusions, one entry per package, package glob or spec glob. */
 export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
-  { path: 'packages/experimental/ptc-runtime-python', category: 'not-mounted', reason: 'No row or preset names it; only the installation manifest lists it, and its README says no shipped profile enables it.' },
   { path: 'packages/subagent/subagent-acp', category: 'not-mounted', reason: 'No bundle, preset or overlay row names it; only its own test fixtures mount it.' },
   { path: 'packages/subagent/subagent-dsh-sdk', category: 'not-mounted', reason: 'No bundle, preset or overlay row names it; only its own test fixtures mount it.' },
   { path: 'packages/sdk/client', category: 'not-mounted', reason: 'Client library for programs that drive dsh over stdio; no profile imports it.' },
@@ -36,7 +35,7 @@ export const MUMBO_CI_UNIT_EXCLUSIONS: readonly UnitExclusion[] = [
   { path: 'packages/bundle/headless', category: 'not-mounted', reason: 'The headless profile bundle; mumbo runs only the web profile.' },
   { path: 'packages/bundle/sdk-app', category: 'not-mounted', reason: 'The sdk profile bundle; mumbo runs only the web profile.' },
   { path: 'packages/bundle/sdk-minimal', category: 'not-mounted', reason: 'The sdk-minimal profile bundle; mumbo runs only the web profile.' },
-  { path: 'packages/lsp/*', category: 'not-mounted', reason: 'No row names the language-server packages.' },
+  { path: 'packages/lsp/*', category: 'not-mounted', reason: 'No row names the language-server packages. If a box ever mounts packages/lsp, remove this exclusion first: the lsp-stdio model-roots test (host.spec.ts, "refuses a source whose real path leaves the roots even inside the workspace") runs only outside mumbo-ci.' },
   { path: 'packages/ssh/*', category: 'not-mounted', reason: 'No row names the SSH execution packages.' },
   { path: 'packages/storage/storage-sqlite', category: 'not-mounted', reason: 'No row names it.' },
   { path: 'packages/fs/tool-str-replace-editor', category: 'not-mounted', reason: 'Only the installation manifest lists it; no web-profile row names it.' },

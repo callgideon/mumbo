@@ -74,6 +74,7 @@
     "architecture/2026-07-30-web-config-plane.md": "sha256:088d70896e71a57d5cbf3949a4840d2bc0732925a344a4feab1d3c46c69d6519",
     "architecture/2026-07-31-claimed-pre-step-inbox-lifecycle.md": "sha256:a35b35c7ed71d1adcb332e8adad4dfbff4ca5c25b3b767cdddb366b13c019d1f",
     "architecture/2026-07-31-code-runtime-portable-identifier-seam.md": "sha256:098def5ec878c1aac8ec492f406237d7cec57bd4a24951db3cdcfb98665cedd9",
+    "architecture/2026-07-31-ptc-runtime-python-fd3-protocol.md": "sha256:fe156b6f8c649e9a1b5eeab5c30efba4431d31bdba27a48e526e41e343e3c18c",
     "architecture/2026-08-01-packaged-ripgrep-search.md": "sha256:1ef31f6f62e17df0d0682f33eed6934c9e6088851a209404bf2b21ff74815d75",
     "architecture/2026-08-03-per-session-agent-presets.md": "sha256:85887abe1f7325e75f70f9455141899597547d0aaaafa5591b5ee3d54f501fb8",
     "architecture/2026-08-03-pi-ai-declared-provider-catalog.md": "sha256:eefff0d342c14fe2fbed5845e683aab719391aca29aea87ddaff7057bdb70d26",

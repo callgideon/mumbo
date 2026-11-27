@@ -3,17 +3,18 @@
   - navigation:
     - button "General"
     - button "Models"
-    - button "Built-in plugins"
+    - button "Plugins"
     - button "Agent presets"
+    - button "Remote connection"
   - button "Open configuration file"
   - button "Close"
   - heading "Models" [level=2]
   - paragraph: Enter your API keys to use models from the following providers.
   - list:
     - listitem:
-      - text: DeepSeek
+      - text: DeepSeek API
       - img "API key missing"
-      - button "Edit DeepSeek (deepseek-official)": Edit
+      - button "Edit DeepSeek API (deepseek-official)": Edit
   - tablist "How to add":
     - tab "Third-party model provider" [selected]
     - tab "Custom model API"

@@ -1,7 +1,6 @@
 import { runInNewContext } from 'node:vm'
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
-import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
+import { ConnectionAuthentication, HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { Mock } from 'vitest'
@@ -166,7 +165,8 @@ describe('background file upload route access', () => {
     ctx.provide('agents', { get: (id: string) => id === agent.id ? agent : undefined } as never)
     ctx.provide('attachments', { saveFileStream, isAttachmentError: () => false } as never)
     ctx.provide('commands', { registerFileReceiptResolver: () => () => {} } as never)
-    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    new ConnectionAuthentication(ctx)
+    const connection = new HostConnectionService(ctx, [])
     new FileUploadsService(ctx)
     const decisions: ConnectionFetchAccessRequest[] = []
     connection.fetch.authorize((request) => {

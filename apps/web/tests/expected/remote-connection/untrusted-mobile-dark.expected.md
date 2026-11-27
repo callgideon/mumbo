@@ -1,0 +1,11 @@
+- region "Remote connection":
+  - heading "Remote connection" [level=2]
+  - status:
+    - paragraph: Allow this address in the Host’s trusted hosts before using either login method.
+  - region "Access address":
+    - heading "Access address" [level=3]
+    - code: {{access-address}}
+    - button "Copy link"
+  - region "Pairing requests":
+    - heading "Pairing requests" [level=3]
+    - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.

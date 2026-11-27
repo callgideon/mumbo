@@ -1,16 +1,18 @@
 # Working Directory
 
-A Session's active directory is owned by [`dsh-working-directory`](../../packages/session/working-directory/README.md). The immutable header identifies the original project; `working-directory/change` records the effective directory used by later directory-based operations. The generated [persistence catalog](../persistence-catalog.md) owns the event declaration.
+A Session's active directory is owned by [`dsh-working-directory`](../../packages/session/working-directory/README.md). The immutable header identifies the original project; `workspace-root/change` records each move of the directory used by later directory-based operations. The generated [persistence catalog](../persistence-catalog.md) owns the event declaration.
 
 ## Directory selection
 
-`ctx.workingDirectory.get(session)` reads the logged value. `ensure(agent)` validates it and restores the original project when the directory disappeared; a missing original project is recreated empty through `ctx.fs.makeDirectory`, with a logged warning and a notice that its earlier files are gone. `set(agent, path)` validates and records a requested change. Sessions without a header directory use the configured runtime fallback, which is recreated the same way. A directory that cannot be recreated produces a logged error.
+`ctx.workingDirectory.get(session)` reads the logged value. `ensure(agent)` validates it and restores the original project when the directory disappeared, or when the filesystem provider refuses it with `FS_OUTSIDE_ROOTS` because a link under a model root leads outside the roots; a missing original project is recreated empty through `ctx.fs.makeDirectory`, with a logged warning and a notice that its earlier files are gone. Each recovery is recorded as a `workspace-root/change`. `set(agent, path)` validates and records a move that a Host operation chose, such as worktree creation, the forge panel, or an SDK request; the model has no tool that moves the directory. Sessions without a header directory use the configured runtime fallback, which is recreated the same way. A directory that cannot be recreated produces a logged error, and an original project the provider also refuses as outside its roots produces `WORKING_DIRECTORY_UNAVAILABLE`.
 
-Changes are local to one Session. Relative filesystem operations, newly started processes, instruction discovery, skills, and file completion use the active directory. Existing terminals and persistent shells retain their own directories. Sandbox writable roots and project membership remain anchored to the original project.
+`get` is the one read of a Session's directory: relative paths resolve from it, and it is the workspace root for everything that follows the Session's checkout. Every change the service records is a `workspace-root/change`. A log written while the model could move the directory holds `working-directory/change` events, which have no writer now. The service ignores them: such a Session resumes in its original project, or in the directory of its last `workspace-root/change`, and the next request's context reports the directory.
+
+Changes are local to one Session. Relative filesystem operations, newly started processes, instruction discovery, skills, and file completion use the active directory. The sandbox `workspace-write` boundary, the Files tree and directory listings, and the change summaries follow it too. Existing terminals and persistent shells retain their own directories. Project membership remains anchored to the original project.
 
 ## Model context
 
-The initial value and subsequent current values reach the model as required user-context snapshots, even when optional runtime context is disabled. Each committed change attempts to queue a notice through the ordinary Agent inbox; cancellation or disposal can discard notices before request admission. The directory event survives, and the next admitted request receives the current value. Directory context never enters the system prompt. [`working_directory`](../../packages/session/tool-working-directory/README.md) exposes one optional `cd` argument.
+The initial value and subsequent current values reach the model as required user-context snapshots, even when optional runtime context is disabled. Each committed change attempts to queue a notice through the ordinary Agent inbox; cancellation or disposal can discard notices before request admission. The directory event survives, and the next admitted request receives the current value. Directory context never enters the system prompt.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -24,67 +26,51 @@ Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnp
 
 ### `ctx.workingDirectory` — `WorkingDirectoryService`
 
-One owner for each Session's effective directory and its model-visible changes.
+One owner for each Session's directory and its model-visible changes.
+
+A Session works in one directory. Relative paths resolve from it, and it is the workspace root that the write boundary, file views, and discovery follow. Only Host operations move it, through set or the recovery of ensure. The `working-directory/change` events of a log written while the model could move the directory do not move it.
 
 ```ts cordis-catalog
 /**
- * Read the committed directory without filesystem I/O.
+ * Read the committed directory without filesystem I/O: where relative paths resolve, and the workspace
+ * root of everything that follows the Session's checkout.
  * @param session - Session whose directory is requested.
- * @returns its effective absolute directory.
+ * @returns the directory of the last Host move, the original project before any, or the deployment
+ * default when none is recorded.
  */
 get(session: Session): string
 
 /**
- * Read who chose the committed directory, without filesystem I/O.
- * @param session - Session whose directory is requested.
- * @returns `'host'` for the original project and directories the person or the harness set; `'model'` otherwise,
- * including directories recorded before the log named a chooser.
- */
-chooser(session: Session): 'model' | 'host'
-
-/**
- * Validate the current directory and restore the original project when it disappeared or, when the model chose it,
- * lies outside the model roots, so no directory reader follows a directory the model may not access. A directory the
- * person or the harness chose is kept wherever it is, except that one under a model root whose real path now leaves
- * the roots is not followed either.
- * A missing original project is recreated empty through the filesystem provider and logged;
- * files it held are not restored. Every Session in this process that was created before the
- * recreation and works in, or falls back to, that project is told once.
+ * Validate the current directory and restore the original project when the current directory disappeared or the
+ * filesystem provider refuses it with `FS_OUTSIDE_ROOTS`, so no directory reader follows a link that leaves the
+ * deployment's roots.
+ * A missing original project is recreated empty through the filesystem provider and logged; files it held are not
+ * restored. Every Session in this process that was created before the recreation and works in, or falls back to,
+ * that project is told once.
  * @param agent - live or unpublished Agent owning the Session.
  * @param signal - cancellation for filesystem inspection and creation.
- * @returns the existing directory; recovery is committed before fulfillment.
- * A notice failure is warned without reverting the committed state.
+ * @returns the existing directory; recovery is committed before fulfillment. A notice failure is
+ * warned without reverting the committed state.
  * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_UNAVAILABLE` when the original project is missing and
- *   cannot be recreated, which is logged, or the service is disposed, or the rejection of a
- *   `working-directory/access` listener.
+ *   cannot be recreated, which is logged, when the provider also refuses the original project with
+ *   `FS_OUTSIDE_ROOTS`, or when the service is disposed; or the rejection of a `working-directory/access` listener.
  */
 ensure(agent: Agent, signal?: AbortSignal): Promise<string>
 
 /**
- * Change one Session's directory without changing existing processes or permissions.
+ * Move one Session's directory to `path`. Existing processes keep their directories. Callers are
+ * Host operations that chose the directory; a model-supplied path would move the workspace-write
+ * boundary with it.
  * @param agent - live or unpublished Agent owning the Session.
  * @param path - absolute path or a path relative to its current directory.
  * @param signal - cancellation before the durable change.
- * @param chooser - who chose `path`: `'model'` resolves it through `fs.resolveModelPath`, so a directory outside the
- * model roots is refused; `'host'`, the person or the harness, resolves it unconfined and records it as theirs, so
- * {@link ensure} keeps it.
  * @returns the canonical absolute directory, committed before fulfillment.
  * A notice failure is warned; the next request still receives the committed directory.
  * @throws {@link WorkingDirectoryError} `WORKING_DIRECTORY_INVALID` for an empty path and
- *   `WORKING_DIRECTORY_NOT_FOUND` when the path is not an existing directory, `FsError` `FS_OUTSIDE_ROOTS` when a
- *   model-chosen one lies outside the model roots, or the rejection of a `working-directory/access` listener.
+ *   `WORKING_DIRECTORY_NOT_FOUND` when the path is not an existing directory, or the rejection of a
+ *   `working-directory/access` listener.
  */
-set(agent: Agent, path: string, signal?: AbortSignal, chooser: 'model' | 'host' = 'host'): Promise<string>
-
-/**
- * Resolve a directory the model chose for another Session, such as a subagent's, without changing this one.
- * @param agent - live Agent whose current directory anchors a relative `path`.
- * @param path - absolute path or a path relative to the Agent's current directory.
- * @param signal - cancellation for filesystem inspection.
- * @returns the canonical absolute directory.
- * @throws when `path` is not an existing directory or lies outside the model roots.
- */
-async resolveModelDirectory(agent: Agent, path: string, signal?: AbortSignal): Promise<string>
+set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>
 ```
 
 Types: [Agent](core.md) · [Session](session.md)

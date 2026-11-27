@@ -33,9 +33,24 @@
     "reason": "Inline Japanese dictionary entries of the macOS permission guide"
   },
   {
-    "path": "packages/experimental/cua/src/{locales,mouse-control-locales}.ts",
+    "path": "packages/experimental/cua/src/{locales,system-input-locales}.ts",
     "line": "^\\s*ja: '",
     "reason": "Inline Japanese (ja) entries of the per-language Computer Use consent prompts"
+  },
+  {
+    "path": "packages/connector/{linear,notion,tencent-docs}/src/locales.ts",
+    "line": "^\\s*ja: '",
+    "reason": "Inline Japanese (ja) entries of the connector presentation text"
+  },
+  {
+    "path": "packages/experimental/timeline/src/policy.ts",
+    "line": "^\\s+(?:label|noActivity|priority): '[^']*[\\p{Script=Hiragana}\\p{Script=Katakana}\\u65e5\\u672c\\u8a9e]",
+    "reason": "Japanese (ja) Timeline output-language label and fixed texts"
+  },
+  {
+    "path": "packages/client/remote-connection/src/anonymous/locales.ts",
+    "line": "\\bja: '[^']*\\p{Script=Katakana}",
+    "reason": "Inline Japanese (ja) pairing-method label"
   },
   {
     "path": "packages/web/*/src/*.ts",
@@ -48,12 +63,7 @@
     "reason": "Japanese-locale test assertions and expected output: lines with kana are Japanese, and the kana-free labels are nihongo (language), settei (Settings), and tejun (Instructions)"
   },
   {
-    "path": "snapshots/web/ptc-round/ui-ja.expected.md",
+    "path": "snapshots/web/{ptc-round,ptc-round-scoped}/ui-ja.expected.md",
     "reason": "Expected Web UI rendered in the Japanese locale"
-  },
-  {
-    "path": "snapshots/web/{creation,plugin}-recommendations/session.v4.jsonl",
-    "line": "\\\\\"ja\\\\\":\\\\\"",
-    "reason": "Recorded tool result carrying each plugin title and description in every shipped locale, including Japanese (ja)"
   }
 ]

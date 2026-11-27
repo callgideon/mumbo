@@ -5,12 +5,12 @@
 - text: v{{version}} Experimental
 - paragraph:
   - code: "@deepseek-ai/dsh-experimental-forge-bundle"
-- paragraph: "Keep linked GitHub pull requests beside your conversation: follow checks and reviews, inspect diffs, and send feedback to the agent. Review local changes and use a separate worktree to isolate each task. GitHub features require the gh CLI installed and signed in on the host."
+- paragraph: "Keep linked change requests beside your conversation, both GitHub pull requests and GitLab merge requests: follow checks and reviews, inspect diffs, and send feedback to the agent. Review local changes and use a separate worktree to isolate each task. GitHub features require the gh CLI installed and signed in on the host. GitLab merge requests require the glab CLI signed in on the host."
 - region "Details":
   - paragraph:
     - img "A conversation linked to a GitHub pull request, with checks, reviews, code diffs, and an isolated worktree"
 - heading "Components" [level=4]
-- text: 6 total · 6 off
+- text: 7 total · 7 off
 - list:
   - listitem:
     - text: Worktree service Create named Git worktrees and change the current session's working directory.
@@ -33,12 +33,17 @@
     - code: "@deepseek-ai/dsh-experimental-forge-github"
     - text: "Off"
   - listitem:
+    - text: GitLab change requests Read and write GitLab merge requests for the forge registry through the GitLab CLI on the host.
+    - code: forge-gitlab
+    - code: "@deepseek-ai/dsh-forge-gitlab"
+    - text: "Off"
+  - listitem:
     - text: Session change requests Bind change requests to the Session that created, pushed, or tracked them, and watch their status.
     - code: forge-session
     - code: "@deepseek-ai/dsh-experimental-forge-session"
     - text: "Off"
   - listitem:
-    - text: Change request panel Shows a Session's change requests in a sidebar tab and lets a new Session start in a worktree.
+    - text: Change request panel Shows a Session's change requests in the Session panel and lets a new Session start in a worktree.
     - code: forge-panel
     - code: "@deepseek-ai/dsh-experimental-client-ui-forge"
     - text: "Off"

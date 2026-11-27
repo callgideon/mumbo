@@ -1,0 +1,8 @@
+- region "Pairing requests":
+  - heading "Pairing requests" [level=3]
+  - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.
+- alert: Request approved
+- region "Pairing requests":
+  - heading "Pairing requests" [level=3]
+  - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.
+- alert: Request denied

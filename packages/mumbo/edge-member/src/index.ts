@@ -46,7 +46,7 @@ const WORKSPACE_DOMAIN = 'workspace'
 /** Cordis function-plugin name. */
 export const name = 'mumbo-edge-member'
 /** Admission, the access policy, and the Workspace, live Session, and stored Session lists the policy grants over. */
-export const inject = ['connection', 'remoteAccess', 'workspaceRegistry', 'sessions', 'sessionPersistence']
+export const inject = ['connection', 'connection.authentication', 'remoteAccess', 'workspaceRegistry', 'sessions', 'sessionPersistence']
 
 /** Edge member configuration. */
 export interface Config {
@@ -65,7 +65,7 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Register the `edge-member` access policy, the member authenticator, and member attribution.
+ * Register the `edge-member` access policy, the member authentication Provider, and member attribution.
  * @param ctx - plugin context carrying Connection, remote access, the Workspace and Session registries, and Session
  *   persistence.
  * @param config - validated configuration.
@@ -77,7 +77,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // Before the listing, so a Session created while it runs stays bound.
   ctx.on('session/created', (session) => { bindings.add(session.id) })
   await bindings.load()
-  // The policy exists before any member can be admitted, and outlives the authenticator on unload.
+  // The policy exists before any member can be admitted, and outlives the authentication Provider on unload.
   ctx.effect(() => ctx.remoteAccess.registerPolicy('edge-member', {
     bindings: () => bindings.current(),
   }), 'mumbo-edge-member: access policy')
@@ -105,11 +105,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   const peers = new MemberPeers(email => ctx.connection.createPeer({ principal: { kind: 'edge-member', email } }))
   ctx.effect(() => () => { peers.clear() }, 'mumbo-edge-member: member Peers')
-  ctx.connection.authenticators.register((request) => {
-    const value = headerValue(request)
-    const member = value === undefined ? undefined : verifyMemberHeader(key, value, Math.floor(Date.now() / 1000))
-    return member === undefined ? undefined : peers.admit(member.email, member.expiry)
-  })
+  // A request the edge signed for a member is that member's even when it also carries the owner's cookie, whichever
+  // plugin loaded or reloaded first; without a valid header this Provider returns no Peer and the others decide.
+  ctx.connection.authentication.register({
+    authenticate(request) {
+      const value = headerValue(request)
+      const member = value === undefined ? undefined : verifyMemberHeader(key, value, Math.floor(Date.now() / 1000))
+      return member === undefined ? undefined : peers.admit(member.email, member.expiry)
+    },
+  }, { precedence: 'first' })
 
   attributeMemberMessages(ctx)
 }

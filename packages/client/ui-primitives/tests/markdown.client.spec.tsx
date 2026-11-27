@@ -104,6 +104,8 @@ describe('MarkdownText', () => {
       '```',
       '**퀊씶**섋퓋',
       '*퀊씶*섋퓋',
+      'word**“싧딉”**word',
+      '댃*“싧딉”*웽툇',
     ].join('\n\n')
     const { container } = render(<MarkdownText text={source} />)
 
@@ -115,6 +117,29 @@ describe('MarkdownText', () => {
     expect(container.textContent).toContain('**Notice:**text')
     expect(container.textContent).toContain('*폔뀲！*웽툇')
     expect(container.textContent).toContain('**꺐둑：**섋퓋')
+    expect(container.textContent).toContain('word**“싧딉”**word')
+    expect(container.textContent).toContain('댃*“싧딉”*웽툇')
+  })
+
+  it('opens strong emphasis after CJK text when the span starts with punctuation', () => {
+    const cases = [
+      ['볘뤓**“삙긺릔뜲왹퐹컧팫빗묠（퀁캳곻긚）쵶춘퐃긚녑탢”**，웽툇', ['“삙긺릔뜲왹퐹컧팫빗묠（퀁캳곻긚）쵶춘퐃긚녑탢”']],
+      ['퀼꼓**“N 팁、D 쌅”**춘돕', ['“N 팁、D 쌅”']],
+      ['덩**“끌쌅꾧셱릗샟”쳦“끌팁꾧셱릦샟”흍뵤춘놇뎗**。', ['“끌쌅꾧셱릗샟”쳦“끌팁꾧셱릦샟”흍뵤춘놇뎗']],
+      ['죹끌**（컂효챭）**쌏콐', ['（컂효챭）']],
+      ['뺘딸콺**“Wi-Fi 읡쥖귷쨬쑬텧”**춘앐껫，늛릆쥋껡**（섋퓋）**춘홝둘。', ['“Wi-Fi 읡쥖귷쨬쑬텧”', '（섋퓋）']],
+      ['끌갡되헲**「캴덩쩇앟앐찅」**，뎷롐덩**달댻콺퀼찅**，귷덩됫싖', ['「캴덩쩇앟앐찅」', '달댻콺퀼찅']],
+      ['괩묄**`bluetoothd`**퐹킡，늛릆**“팫빗묠”**똥큇', ['bluetoothd', '“팫빗묠”']],
+    ] as const
+    const source = cases.map(([markdown]) => markdown).join('\n\n')
+
+    for (const streaming of [false, true]) {
+      const rendered = render(<MarkdownText text={source} streaming={streaming} />)
+      expect([...rendered.container.querySelectorAll('strong')].map(node => node.textContent))
+        .toEqual(cases.flatMap(([, strong]) => strong))
+      expect(rendered.container.textContent).not.toContain('**')
+      rendered.unmount()
+    }
   })
 
   it('links complete HTTP(S) inline code without promoting commands, unsafe schemes, or fences', () => {

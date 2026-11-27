@@ -1,6 +1,6 @@
 /**
  * The plugin in real Loader compositions: the shipped example overlays put the links in the served page bootstrap,
- * and on a person box Host with Connection and the project member authenticator, the Browser tab's route brings
+ * and on a person box Host with Connection, the Token Provider and the project member Provider, the Browser tab's route brings
  * Chrome's window to the front for the owner and answers a member 403 before any command runs.
  */
 import { randomBytes } from 'node:crypto'
@@ -16,7 +16,8 @@ import TypertGatewayService from '@deepseek-ai/dsh-api-gateway'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
-import WebServer from '@deepseek-ai/dsh-host-webserver'
+import * as AuthenticationToken from '@deepseek-ai/dsh-host-authentication-token'
+import WebServer, { type WebEntryUrl } from '@deepseek-ai/dsh-host-webserver'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import type { BrowserHold } from '@mumbo/browser-consent'
@@ -64,7 +65,7 @@ it.each([
     ],
     loadOverlayPatches('box-links-test', overlay),
     (message) => { throw new Error(message) },
-  )
+  ).data
   const configPath = join(directory, 'cordis.yml')
   await writeFile(configPath, JSON.stringify(rows))
   ctx.baseUrl = pathToFileURL(directory).href + '/'
@@ -136,6 +137,7 @@ async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome', consen
     ['@deepseek-ai/dsh-api-gateway', TypertGatewayService],
     ['@deepseek-ai/dsh-host-webserver', WebServer],
     ['@deepseek-ai/dsh-client-connection', Connection],
+    ['@deepseek-ai/dsh-host-authentication-token', AuthenticationToken],
     ['@mumbo/edge-member', EdgeMember],
     ['@mumbo/box-links', BoxLinks],
   ]))
@@ -145,16 +147,12 @@ async function personBox(desktop: 'chrome' | 'empty' | 'hung' = 'chrome', consen
   const takeoverRoute = (headers: Record<string, string>, body?: string) => fetch(`${origin}${TAKEOVER_ROUTE}`, {
     method: body === undefined ? 'GET' : 'POST', headers: { origin, ...headers }, ...body === undefined ? {} : { body },
   })
-  /** Exchange the Host's launch token for the owner's browser cookie. */
-  const owner = (): Record<string, string> => {
-    const target = new URL(ctx.connection.authenticatedUrl(origin))
-    let setCookie: string | undefined
-    ctx.connection.authorizeIndex({ method: 'GET', url: `${target.pathname}${target.search}`, headers: { host: target.host } }, {
-      writeHead(_status, headers) { setCookie = headers?.['set-cookie'] },
-      end() {},
-    })
-    return { cookie: setCookie!.split(';', 1)[0]! }
-  }
+  /** Exchange the Token plugin's entry URL for the owner's browser cookie over HTTP. */
+  const entries: WebEntryUrl[] = []
+  ctx.emit(ctx.webServer, 'webserver/entry-url', origin, entries)
+  const exchange = await fetch(entries[0]!.url, { redirect: 'manual' })
+  const cookie = exchange.headers.get('set-cookie')!.split(';', 1)[0]!
+  const owner = (): Record<string, string> => ({ cookie })
   const member = (): Record<string, string> => ({ 'x-mumbo-member': EdgeMember.signMemberHeader(key, 'ann@example.com', Math.floor(Date.now() / 1000) + 300) })
   return { ctx, commands, signals, exited: () => exited, post, takeoverRoute, owner, member, withdrawConsent }
 }

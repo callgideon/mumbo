@@ -174,12 +174,14 @@ async function relay(source: SourceContext, member: string, request: RelayReques
 }
 
 /**
- * Register the relay Source kind and mount `POST /orchestrator/relay`. A request is received only when `ctx.connection.admit`
- * admits it (with DSH's Host and Origin checks) as a live `edge-member` Peer; its body is a {@link RelayRequest} whose first
+ * Register the relay Source kind and mount `POST /orchestrator/relay`. The route requires authentication and admits non-owner
+ * Peers (`access: 'non-owner'`), so the web server answers an untrusted Host or Origin 403, a request without a credential 401
+ * and a failed credential check 503 as plain text before the handler runs. A request is received only when
+ * `ctx.connection.admit` admits it as a live `edge-member` Peer; its body is a {@link RelayRequest} whose first
  * hop is `{ node: 'member', id: <that member> }`. Responses:
  * 200 `{ result: 'stored' | 'duplicate', trigger, thread, waiting? }`, where a repeated message id with the same text, kind,
  * worker and conversation is `duplicate` and `waiting: 'setup'` means evaluation waits for the Superagent setup; and `{ error, code }`
- * with 400 `invalid_request` (`issues` lists the fields, `hops.0` for another first hop), 401 or 403 `unauthenticated` (DSH admission), 403
+ * with 400 `invalid_request` (`issues` lists the fields, `hops.0` for another first hop), 401, 403 or 503 `unauthenticated` (DSH admission), 403
  * `member_required`, 405 `method`, 409 `id_reused` or `relay_off`, 413 `too_large`, or 500 `failed`.
  * @param ctx - plugin context carrying the web server and Connection.
  * @param host - the runtime the Source receives into.
@@ -188,7 +190,8 @@ async function relay(source: SourceContext, member: string, request: RelayReques
 export function registerRelay(ctx: Pick<Context, 'connection' | 'webServer'>, host: SourceHost): () => void {
   const unregister = host.sources.register(relayKind)
   const source = sourceContext(host, relayKind)
-  const unmount = ctx.webServer.register({ kind: 'exact', path: RELAY_PATH, handler: async (req, res) => {
+  // Non-owner Peers pass the web server's admission; the handler then receives from an `edge-member` only.
+  const unmount = ctx.webServer.register({ kind: 'exact', path: RELAY_PATH, access: 'non-owner', handler: async (req, res) => {
     try {
       if (req.method !== 'POST') throw new Refusal(405, 'method', 'Relay a message with POST')
       const admission = ctx.connection.admit(req)

@@ -1,0 +1,9 @@
+- region "Remote connection":
+  - heading "Remote connection" [level=2]
+  - region "Access address":
+    - heading "Access address" [level=3]
+    - alert: Could not load remote connection settings. Try again.
+    - button "Try again"
+  - region "Pairing requests":
+    - heading "Pairing requests" [level=3]
+    - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.

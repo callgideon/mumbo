@@ -66,7 +66,7 @@ class ScriptedModel extends LlmAdapter {
  * @param root - scratch directory holding the config and serving as the Session's working directory.
  * @param options - consent config, approval policy, model script, the person's answers in order (`hang` never answers, and
  *   a function answers once it settles),
- *   rows placed before and after consent, and extra services each row waits for, by row id.
+ *   rows placed before and after consent, their configs and the extra services each row waits for, by row id.
  * @returns the booted context and Session, the approval reasons asked, every Session event, logged errors, and the
  *   consent Fiber.
  */
@@ -79,6 +79,7 @@ export async function bootComposition(root: string, options: {
   before?: ReadonlyArray<readonly [string, Plugin]>
   after?: ReadonlyArray<readonly [string, Plugin]>
   inject?: Readonly<Record<string, string[]>>
+  configs?: Readonly<Record<string, unknown>>
 }) {
   const asked: string[] = []
   const answers = [...options.answers ?? []]
@@ -104,6 +105,7 @@ export async function bootComposition(root: string, options: {
     loop: { agents: [] },
     approval: { policy: options.approvalPolicy ?? 'ask' },
     consent: options.consent,
+    ...options.configs,
   }
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, JSON.stringify([...modules.keys()].map(name => ({

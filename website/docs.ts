@@ -46,6 +46,7 @@ const homeAndGuide: DocsPage[] = [
     ['docs/user/guide/python-sdk.md', 'guide/python-sdk.md', 'Python', 'SDK', 1],
     ['docs/user/guide/github-review.md', 'guide/github-review.md', 'GitHub review sessions', 'Automation', 1],
     ['docs/user/guide/schedule.md', 'guide/schedule.md', 'Session reminders', 'Automation', 2],
+    ['docs/user/session-control.md', 'guide/session-control.md', 'Cross-Session messages', 'Automation', 3],
     ['docs/user/guide/plugin-market.md', 'guide/plugin-market.md', 'Plugin indexes', 'Integrations', 2],
     ['docs/user/guide/mcp-memory.md', 'guide/mcp-memory.md', 'Memory MCP', 'Integrations', 1],
   ] as const).map(([source, route, label, section, order]): DocsPage => ({
@@ -210,9 +211,10 @@ const referencePages = [
   ['docs/cordis-api/inherited.md', 'reference/cordis-api/inherited.md', 'Inherited surface', 'Cordis Core API', 5],
   ['docs/cookbook/adding-a-package.md', 'reference/cookbook/adding-a-package.md', 'Adding a package', 'Cookbook', 0],
   ['docs/cookbook/adding-a-tool.md', 'reference/cookbook/adding-a-tool.md', 'Adding a tool', 'Cookbook', 1],
-  ['docs/cookbook/adding-an-llm-adapter.md', 'reference/cookbook/adding-an-llm-adapter.md', 'Adding an LLM adapter', 'Cookbook', 2],
-  ['docs/cookbook/adding-a-settings-card.md', 'reference/cookbook/adding-a-settings-card.md', 'Adding a settings page', 'Cookbook', 3],
-  ['docs/cookbook/extension-cookbook.md', 'reference/cookbook/extension-cookbook.md', 'Extension patterns', 'Cookbook', 4],
+  ['docs/cookbook/contributing-system-messages.md', 'reference/cookbook/contributing-system-messages.md', 'Contributing system messages', 'Cookbook', 2],
+  ['docs/cookbook/adding-an-llm-adapter.md', 'reference/cookbook/adding-an-llm-adapter.md', 'Adding an LLM adapter', 'Cookbook', 3],
+  ['docs/cookbook/adding-a-settings-card.md', 'reference/cookbook/adding-a-settings-card.md', 'Adding a settings page', 'Cookbook', 4],
+  ['docs/cookbook/extension-cookbook.md', 'reference/cookbook/extension-cookbook.md', 'Extension patterns', 'Cookbook', 5],
 ] as const
 
 const reference: DocsPage[] = referencePages.map(([source, route, label, section, order, outline]): DocsPage => ({

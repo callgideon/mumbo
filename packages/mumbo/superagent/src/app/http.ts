@@ -253,9 +253,11 @@ function match(table: Routes, method: string, segments: string[]) {
   return undefined
 }
 /**
- * Mount `/orchestrator/api/` on the DSH web server. A request runs its route only when `ctx.connection.admit` admits it (which
- * also applies DSH's Host and Origin checks) as a live Peer whose principal is the owner or an `edge-member` listed in
- * `panelAdmins`, and it carries `x-orchestrator-request: 1`; otherwise it gets the admission's 401 or 403, or 403.
+ * Mount `/orchestrator/api/` on the DSH web server. The route requires authentication and admits non-owner Peers
+ * (`access: 'non-owner'`), so the web server answers an untrusted Host or Origin 403, a request without a credential 401
+ * and a failed credential check 503 as plain text before the handler runs. A request then runs its route only when
+ * `ctx.connection.admit` admits it as a live Peer whose principal is the owner or an `edge-member` listed in
+ * `panelAdmins`, and it carries `x-orchestrator-request: 1`; otherwise it gets the admission's 401, 403 or 503, or 403.
  * @param ctx - plugin context carrying the web server and Connection.
  * @param runtime - the orchestrator state the routes read and change.
  * @returns disposer unmounting the routes.
@@ -263,7 +265,8 @@ function match(table: Routes, method: string, segments: string[]) {
 export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   const table = routes(runtime)
   const disposers = [
-    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
+    // Non-owner Peers pass the web server's admission; the handler then serves only the owner and panel admins.
+    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', access: 'non-owner', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       const admission = ctx.connection.admit(req)

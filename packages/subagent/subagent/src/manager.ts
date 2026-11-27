@@ -12,7 +12,7 @@ import type {} from '@deepseek-ai/dsh-working-directory'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { ReasoningEffortId, contentHasImage, createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
+import { type ReasoningEffortId, contentHasImage, createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { Session, SessionId, SessionEvent, UserMessage } from '@deepseek-ai/dsh-session'
@@ -36,9 +36,9 @@ import type { LifecycleEmitter } from './lifecycle.ts'
 import { ROOT_AGENT_NAME, SiblingNameReservations, agentAddress, joinAgentPath, parentAgentPath } from './names.ts'
 import type { SiblingNameReservation } from './names.ts'
 import type { SubagentCatalogEntry, SubagentIdentityProjection } from './projection-types.ts'
-import { SubagentRunId } from './types.ts'
+import type { SubagentRunId } from './types.ts'
 import type {
-  ContinuableCreateRequest, ContinuableCreateSpec, SubagentInterruptAuthority,
+  ContinuableCreateRequest, ContinuableCreateSpec, SubagentInterruptAuthority, SubagentCapacity,
   SubagentActivationSpec, SubagentActivation, SubagentMemberNames, SubagentStartRequest, SubagentRun,
   SubagentSendMessageOptions, SubagentResult, SubagentRunInfo, ResolvedSubagentStartRequest,
 } from './types.ts'
@@ -95,8 +95,6 @@ type MaterializeInputs = MaterializeBase & (
       parent: Agent
       /** Absolute initial directory captured before provider preparation. */
       cwd: string
-      /** Who chose {@link cwd}; the child's working directory records it so model roots confine only the model's choice. */
-      cwdChooser: 'model' | 'host'
       seed: readonly SessionEvent[] | undefined
       meta: NonNullable<CreateAgentOptions['meta']>
       /** Exact parent-log prefix length inside {@link seed}. */
@@ -355,7 +353,7 @@ export class SubagentManager {
       // parent's future, not to this child.
       const delegatedPolicies = captureDelegatedPolicyOverrides(parent)
 
-      const { cwd, chooser: cwdChooser } = await this.resolveDirectory(spec, signal)
+      const cwd = await this.resolveDirectory(spec, signal)
       const prepared = await prepare({
         sessionId: childId,
         cwd,
@@ -390,7 +388,6 @@ export class SubagentManager {
           create: {
             parent,
             cwd,
-            cwdChooser,
             seed,
             meta: childSessionMeta(parent, childDepth, prepared.seed !== undefined, spec.agentPreset),
             inheritedEventCount,
@@ -406,12 +403,13 @@ export class SubagentManager {
         established = activation
         const child = requireLocalActivation(activation).handle.agent
         const childHeader = child.session.header
+        const task = createAgentMessage(parent, agentAddress(this.pathOf(parent, ancestry.root), parent.id), spec.prompt)
         return await this.submitMaterialized(
           activation,
           spec.delivery !== 'caller'
-            ? withResultDeliveryGuidance(spec.prompt)
-            : spec.prompt,
-          { source: { kind: 'user' }, signal, delivery: 'queue', authorize: () => { this.assertAdmitting(parent) } },
+            ? withResultDeliveryGuidance([...task.content])
+            : [...task.content],
+          { source: task.source, signal, delivery: 'queue', authorize: () => { this.assertAdmitting(parent) } },
           ancestry.root,
           () => {
             this.assertAdmitting(parent)
@@ -462,7 +460,7 @@ export class SubagentManager {
     return this.trackStartup(ancestry.root, spec.signal, async (signal) => {
       let activation: Activation | undefined
       try {
-        const { cwd } = await this.resolveDirectory(spec, signal)
+        const cwd = await this.resolveDirectory(spec, signal)
         activation = await this.materialize({
           kind: 'external',
           provider,
@@ -494,21 +492,13 @@ export class SubagentManager {
     })
   }
 
-  /**
-   * Capture the explicit or inherited directory, and who chose it, while the parent still owns startup. An inherited
-   * directory keeps the parent's chooser.
-   */
-  private async resolveDirectory(
-    request: Pick<SubagentStartRequest, 'parent' | 'cwd' | 'cwdChooser'>, signal: AbortSignal,
-  ): Promise<{ cwd: string; chooser: 'model' | 'host' }> {
-    const workingDirectory = this.ctx.workingDirectory
-    if (request.cwd !== undefined && request.cwdChooser !== 'host') {
-      return { cwd: await workingDirectory.resolveModelDirectory(request.parent, request.cwd, signal), chooser: 'model' }
-    }
-    if (request.cwd !== undefined && isAbsolute(request.cwd)) return { cwd: request.cwd, chooser: 'host' }
-    const cwd = resolve(await workingDirectory.ensure(request.parent, signal), request.cwd ?? '.')
+  /** Capture the explicit or inherited directory while the parent still owns startup. */
+  private async resolveDirectory(request: Pick<SubagentStartRequest, 'parent' | 'cwd'>, signal: AbortSignal): Promise<string> {
+    const cwd = request.cwd !== undefined && isAbsolute(request.cwd)
+      ? request.cwd
+      : resolve(await this.ctx.workingDirectory.ensure(request.parent, signal), request.cwd ?? '.')
     signal.throwIfAborted()
-    return { cwd, chooser: request.cwd === undefined ? workingDirectory.chooser(request.parent.session) : 'host' }
+    return cwd
   }
 
   /**
@@ -798,6 +788,18 @@ export class SubagentManager {
     return this.closingRoots.has(root) ? root : undefined
   }
 
+  /**
+   * Observe the shared capacity of a live tree member.
+   * @param caller - exact live root or resident child selecting the tree.
+   * @returns occupied slots and the current configured limit, without reserving capacity.
+   */
+  capacityOf(caller: Agent): SubagentCapacity {
+    return {
+      running: this.rootPools.get(this.rootOf(caller))?.size ?? 0,
+      limit: this.maxActiveSubagents(),
+    }
+  }
+
   /** Share one capacity pool across every instance in a subagent tree. */
   private rootPool(parent: Agent): ActivationPool {
     let pool = this.rootPools.get(parent)
@@ -847,8 +849,10 @@ export class SubagentManager {
           child.session.append('subagent/descriptor', create.descriptor)
           appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
           const workingDirectory = childCtx.get('workingDirectory')
-          if (workingDirectory === undefined) throw new Error('local subagents require the working-directory service')
-          await workingDirectory.set(child, create.cwd, inputs.signal, create.cwdChooser)
+          if (workingDirectory === undefined) {
+            throw new SubagentError('local subagents require the working-directory service', 'WORKING_DIRECTORY_UNAVAILABLE')
+          }
+          await workingDirectory.set(child, create.cwd, inputs.signal)
         }
         if (inputs.composition.agentPreset === undefined) await applyChildComposition(childCtx, create?.parent, inputs.composition)
         if (inputs.outputSchema !== undefined) {
@@ -868,7 +872,9 @@ export class SubagentManager {
         : await this.ownerCtx.agents.create({
           sessionId: childId,
           meta: create.meta,
-          ...(create.seed === undefined ? {} : { seed: create.seed }),
+          ...(create.seed === undefined ? {} : {
+            seed: create.seed, parentSource: { sessionId: create.parent.id, endSeq: SessionLogOffset(create.seed.length) },
+          }),
           inheritedEventCount: create.inheritedEventCount,
           agentOptions: inputs.agentOptions,
           signal: inputs.signal,
@@ -889,7 +895,7 @@ export class SubagentManager {
     const activation: Activation = {
       releaseSlot,
       childId,
-      runId: SubagentRunId(randomUUID()),
+      runId: brandString<SubagentRunId>(randomUUID()),
       provider,
       ...resource,
       root,
@@ -1227,7 +1233,16 @@ export class SubagentManager {
       using source = await this.observeContinuation(childId, signal)
       this.assertAdmitting(root)
       const ownEvents = source.events.slice(source.inheritedEventCount)
-      const descriptor = foldSubagentDescriptor(ownEvents)
+      let descriptor: ReturnType<typeof foldSubagentDescriptor>
+      try {
+        descriptor = foldSubagentDescriptor(ownEvents)
+      } catch (error: unknown) {
+        throw new SubagentError(
+          `subagent "${childId}" has a corrupt continuation descriptor and cannot be resumed; choose a different target`,
+          'NOT_RESUMABLE',
+          { cause: error },
+        )
+      }
       if (descriptor === undefined || descriptor.mode !== 'continuable') {
         throw new SubagentError(
           `subagent "${childId}" has no supported continuation state and cannot be resumed; choose a different target`,
@@ -1253,7 +1268,7 @@ export class SubagentManager {
             ...descriptor.agentProvider !== undefined ? { provider: descriptor.agentProvider } : {},
             ...descriptor.agentModel !== undefined ? { model: descriptor.agentModel } : {},
             ...descriptor.agentReasoningEffort !== undefined
-              ? { reasoningEffort: ReasoningEffortId(descriptor.agentReasoningEffort) }
+              ? { reasoningEffort: brandString<ReasoningEffortId>(descriptor.agentReasoningEffort) }
               : {},
           },
           composition: {

@@ -22,6 +22,7 @@ import {
   PROFILE_COMPATIBILITY_FILENAME,
   PROFILE_PATCH_FILENAME,
   readProfileManifest,
+  readProfileDenyList,
   readProfilePatches,
   removeLinkProjections,
   reportSkippedBundles,
@@ -198,7 +199,44 @@ describe('resolveProfileDir', () => {
   })
 })
 
-it('composes current files from profile data and retains launch overlay and telemetry precedence', () => {
+it('leaves out denied bundles and the profile and home patches that enable a denied row, and rejects a list it cannot read', () => {
+  const home = tmp()
+  const installAnchor = stageInstallation({
+    base: { patch: '- insert:\n  - id: plugin-deny-list\n    name: deny\n    config:\n      bundles: !!js "process.pid > 0 ? [\'extra\'] : []"\n      rows: [pairing, cli]\n'
+      + '  - id: plugin-manager\n    name: manager\n  - id: pairing\n    name: pairing\n    disabled: true\n  - id: cli\n    name: cli\n    disabled: true\n  - id: other\n    name: other\n    disabled: true\n' },
+    extra: { patch: '- insert:\n  - id: extra-row\n    name: extra\n' },
+  })
+  const dir = resolveProfileDir('test', home)
+  initProfile(dir, ['base', 'extra'])
+  const patchPath = join(dir, PROFILE_PATCH_FILENAME)
+  writeFileSync(patchPath, '- id: pairing\n  disabled: false\n  config: { kept: true }\n- id: other\n  disabled: false\n- id: cli\n  disabled: true\n')
+  writeFileSync(join(home, PROFILE_PATCH_FILENAME), '- id: cli\n  disabled: !!js "false"\n')
+  const overlayPath = join(home, 'overlay.yml')
+  // Another row's config patch, as a deployment overlay writes one, does not reach the list.
+  writeFileSync(overlayPath, '- id: plugin-manager\n  config:\n    modelTools: false\n')
+  const context = {
+    name: 'test', dir, patchPath, installAnchor, home, cwd: home,
+    startedBundles: ['base', 'extra'], overlayPaths: [overlayPath], telemetryDisabledEnv: undefined,
+  }
+  const rows = (): Record<string, unknown> => Object.fromEntries(composeEntries([readProfilePatches('test', context)]).map(row => [row.id, row.disabled]))
+  expect(readProfileDenyList('test', context)).toEqual({ bundles: ['extra'], rows: ['pairing', 'cli'], dropped: ['extra', 'pairing', 'cli'] })
+  expect(rows()).toEqual({ 'plugin-deny-list': undefined, 'plugin-manager': undefined, 'pairing': true, 'cli': true, 'other': false })
+  expect(composeEntries([readProfilePatches('test', context)]).find(row => row.id === 'pairing')?.config).toEqual({ kept: true })
+  // A deployment overlay is not the profile's own patch and may switch a listed row on. The list is read even from a disabled row.
+  writeFileSync(overlayPath, '- id: pairing\n  disabled: false\n- id: plugin-deny-list\n  disabled: true\n')
+  expect(rows()).toMatchObject({ pairing: false, cli: true })
+  expect(readProfileDenyList('test', context).bundles).toEqual(['extra'])
+  // A layer that patches the row's config replaces both lists.
+  writeFileSync(overlayPath, '- id: plugin-deny-list\n  config: {}\n')
+  expect(readProfileDenyList('test', context)).toEqual({ bundles: [], rows: [], dropped: [] })
+  expect(rows()).toMatchObject({ 'pairing': false, 'cli': { __jsExpr: 'false' }, 'extra-row': undefined })
+  writeFileSync(overlayPath, '- id: plugin-deny-list\n  config:\n    rows: [1]\n')
+  expect(rows).toThrow('test: plugin-deny-list rows must be a list of strings')
+  writeFileSync(overlayPath, '- id: plugin-deny-list\n  config:\n    bundles: !!js "ctx.missing.value"\n')
+  expect(rows).toThrow('test: plugin-deny-list bundles could not be evaluated before plugins load')
+})
+
+it('composes current profile, home, and overlay files with telemetry precedence', () => {
   const home = tmp()
   const installAnchor = stageInstallation({ base: { patch: '- insert:\n  - id: session-telemetry-otel\n    name: telemetry\n' } })
   const dir = resolveProfileDir('test', home)
@@ -206,23 +244,26 @@ it('composes current files from profile data and retains launch overlay and tele
   const patchPath = join(dir, 'application.patch.yml')
   writeFileSync(patchPath, '- id: session-telemetry-otel\n  disabled: true\n')
   writeFileSync(join(home, PROFILE_PATCH_FILENAME), '- id: session-telemetry-otel\n  disabled: false\n')
+  const overlayPath = join(home, 'overlay.yml')
+  writeFileSync(overlayPath, '- id: session-telemetry-otel\n  disabled: false\n')
   const context = {
     name: 'test', dir, patchPath, installAnchor, home, cwd: home,
     startedBundles: ['base'],
-    overlays: [{ id: 'session-telemetry-otel', disabled: false }], telemetryDisabledEnv: 'false',
+    overlayPaths: [overlayPath], telemetryDisabledEnv: 'false',
   }
   expect(composeEntries([readProfilePatches('test', context)])[0]?.disabled).toBe(true)
   const enabled = { ...context, telemetryDisabledEnv: undefined }
   expect(composeEntries([readProfilePatches('test', enabled)])[0]?.disabled).toBe(false)
-  const patches = readProfilePatches('test', enabled)
-  patches.at(-1)!.disabled = true
-  expect(context.overlays[0]?.disabled).toBe(false)
+  writeFileSync(overlayPath, '- id: session-telemetry-otel\n  disabled: true\n')
+  expect(composeEntries([readProfilePatches('test', enabled)])[0]?.disabled).toBe(true)
+  rmSync(overlayPath)
+  expect(() => readProfilePatches('test', enabled)).toThrow(`failed to read overlay ${overlayPath}`)
   writeFileSync(join(home, PROFILE_PATCH_FILENAME), '- id: session-telemetry-otel\n  disabled: true\n')
-  expect(composeEntries([readProfilePatches('test', { ...enabled, overlays: [] })])[0]?.disabled).toBe(true)
+  expect(composeEntries([readProfilePatches('test', { ...enabled, overlayPaths: [] })])[0]?.disabled).toBe(true)
   writeFileSync(join(home, PROFILE_PATCH_FILENAME), '[]\n')
-  expect(composeEntries([readProfilePatches('test', { ...enabled, overlays: [] })])[0]?.disabled).toBe(true)
+  expect(composeEntries([readProfilePatches('test', { ...enabled, overlayPaths: [] })])[0]?.disabled).toBe(true)
   writeFileSync(patchPath, '- id: session-telemetry-otel\n  disabled: false\n')
-  expect(composeEntries([readProfilePatches('test', { ...enabled, overlays: [] })])[0]?.disabled).toBe(false)
+  expect(composeEntries([readProfilePatches('test', { ...enabled, overlayPaths: [] })])[0]?.disabled).toBe(false)
 })
 
 describe('initProfile', () => {

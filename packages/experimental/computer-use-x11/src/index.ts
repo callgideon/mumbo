@@ -9,7 +9,8 @@ import Schema from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
-import { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/brand'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
@@ -487,7 +488,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   })
 
   ctx.effect(function* () {
-    yield ctx.computerUse.register(ComputerUseProviderName('x11'))
+    yield ctx.computerUse.register(brandString<ComputerUseProviderName>('x11'))
     yield async () => {
       lifetime.abort()
       await Promise.allSettled(pending)

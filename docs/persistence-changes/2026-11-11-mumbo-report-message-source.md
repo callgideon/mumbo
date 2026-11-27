@@ -26,19 +26,19 @@ baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
     previous: "2026-11-09-superagent-message-source"
-    after: "460f3f0936c5f42f9c9a3b815c1ce97d240f2a236385667af0302b82705b0ac0"
+    after: "1fb2851147546fda5469e194f4cbc22a365212bc67743b25437409a18c0e7ab3"
     decision: same-version
   - root: "event:developer/message"
     previous: "2026-11-09-superagent-message-source"
-    after: "049a02254af90583fcdad89f8ca62bbf89b94c2ae6489f0088b90ae997e26531"
+    after: "a6e60a5d49b90f45dafa963ae09d6afb4fbd2f4c26d8ddc4fcdc0b6b4d0fb5bd"
     decision: same-version
   - root: "event:session/title-llm-request"
     previous: "2026-11-09-superagent-message-source"
-    after: "811b1359ada8b3c51d3aae3c3e432b9e1c5038c8ca2ef0b7760bba2d02d8a147"
+    after: "8818bace1293b732ebd14b16ba67ebb5fe2870114a744208cf145f7fe97e8a4d"
     decision: same-version
   - root: "event:user/message"
     previous: "2026-11-09-superagent-message-source"
-    after: "af249ed90428da55ddcf7e03214a8acd22de036cc3b56e8767cada4e5e2cf588"
+    after: "cb1225ecba7ed1fbb802a03d2b40be5d97d573e08e13f2f21db75b7bb9f5af32"
     decision: same-version
 ```
 

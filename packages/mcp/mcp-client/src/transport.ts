@@ -11,7 +11,7 @@
 
 import { setTimeout as delay } from 'node:timers/promises'
 import type { Context } from '@deepseek-ai/cordis'
-import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
+import type { AuthProvider, FetchLike, JSONRPCMessage, Transport } from '@modelcontextprotocol/client'
 import { ReadBuffer, SdkError, SdkErrorCode, serializeMessage, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
 import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
@@ -156,13 +156,15 @@ export function identityHome(config: StdioConfig, identity: string, subprocess: 
  * @param config - Resolved plugin config discriminated on `transport`.
  * @param ctx - context whose subprocess service starts a stdio server that names an identity, and every stdio
  *   server when that service runs children as a run-as identity.
+ * @param fetch - optional OAuth request wrapper that binds each request to the active grant.
+ * @param authProvider - optional passive OAuth token and refresh callbacks.
  * @returns an unstarted MCP transport (stdio or Streamable HTTP).
  * @throws when a stdio config names an identity and no subprocess service is mounted or it refuses that identity's
  *   home; under a provider that runs children as a run-as identity, when a stdio config names none and the provider
  *   names no server identity; or when the `cwd` of a server started through the subprocess service is not its
  *   identity's home.
  */
-export function createTransport(config: Config, ctx: Context): Transport {
+export function createTransport(config: Config, ctx: Context, fetch?: FetchLike, authProvider?: AuthProvider): Transport {
   switch (config.transport) {
     case 'stdio': {
       const subprocess = ctx.get('subprocess')
@@ -190,7 +192,9 @@ export function createTransport(config: Config, ctx: Context): Transport {
     case 'streamable-http':
       return new StreamableHTTPClientTransport(
         new URL(config.url),
-        { requestInit: { headers: config.headers } },
+        { requestInit: { headers: config.headers }, ...fetch === undefined ? {} : { fetch },
+          ...authProvider === undefined ? {} : { authProvider, onInsufficientScope: 'throw' },
+        },
       )
   }
 }

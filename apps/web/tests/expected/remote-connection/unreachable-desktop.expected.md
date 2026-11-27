@@ -1,0 +1,14 @@
+- region "Remote connection":
+  - heading "Remote connection" [level=2]
+  - status:
+    - paragraph: This address cannot be used to sign in from another device; configure a reachable address, such as a LAN address or an already configured public or VPN address.
+  - region "Access address":
+    - heading "Access address" [level=3]
+    - code: {{access-address}}?token={{login-token}}
+    - button "Copy link"
+    - paragraph: Keep this login link private
+    - paragraph: This link contains sign-in credentials; anyone who can reach this address can use it to sign in. Send it only to your own devices; do not share it publicly. Restarting the server invalidates the link.
+    - paragraph: HTTP sends login credentials without encryption. Use only on a trusted network.
+  - region "Pairing requests":
+    - heading "Pairing requests" [level=3]
+    - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.

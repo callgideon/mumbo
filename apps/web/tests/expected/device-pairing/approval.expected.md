@@ -1,0 +1,10 @@
+- region "Pairing requests":
+  - heading "Pairing requests" [level=3]
+  - paragraph: Open this app on the other device and request pairing. Compare the codes before approving.
+  - note:
+    - paragraph: Approval gives that browser full access to this app, including approving other devices.
+  - text: Pairing code
+  - code: {{pairing-code}}
+  - paragraph: Source IP 127.0.0.1
+  - button "Approve"
+  - button "Deny"

@@ -3,7 +3,7 @@
  * @module @mumbo/browser-consent/types
  */
 
-import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm/types'
 
 /** What allowed a browser write: a configured site allowance, or a one-shot user approval. */
 export type BrowserWriteGrant = 'site' | 'approval'

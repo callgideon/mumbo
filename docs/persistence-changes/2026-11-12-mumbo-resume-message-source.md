@@ -26,19 +26,19 @@ baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
     previous: "2026-11-11-mumbo-report-message-source"
-    after: "cbc55234946ff1c1bbfd3ecc5ca6693ea43fdbc5a52e39d140fb893a57b52101"
+    after: "bd96daa382c463073faa1602b1cf67ed55bab7637b0fe6f5799b857c013e1679"
     decision: same-version
   - root: "event:developer/message"
     previous: "2026-11-11-mumbo-report-message-source"
-    after: "1bd0efa8ba71f72807c40cde096d850a7d763e9aa5620b867d48a323721895aa"
+    after: "20678fb82d2bb27b41e7a910f1d03038fc351b6c2821aadca1767019ab3d5660"
     decision: same-version
   - root: "event:session/title-llm-request"
     previous: "2026-11-11-mumbo-report-message-source"
-    after: "455cbe98b3a8e5024fc8a7fbd80a450407395b4c355a61f76f58e6775ebf7ce5"
+    after: "d42bd115b2d7bccdc5f25ebeffde2d02e86ce58a88b87df8a774cab8f73d8b02"
     decision: same-version
   - root: "event:user/message"
     previous: "2026-11-11-mumbo-report-message-source"
-    after: "5d43415dabe040132520f6263d384342e3c0c4165ba14f6b5d00d6699783a168"
+    after: "351a2589afa8ab19a15b4c851b885b31103f339d52a681df82bc1d16d4e783fa"
     decision: same-version
 ```
 

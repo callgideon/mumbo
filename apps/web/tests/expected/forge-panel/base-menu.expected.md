@@ -1,4 +1,3 @@
-- textbox "Search branches"
 - group "Default":
   - menuitem "origin/main Default"
 - group "Local branches":

@@ -1,7 +1,7 @@
 /** One transport lifetime, including pending work and confirmed closure. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Client, Transport } from '@modelcontextprotocol/client'
+import type { AuthProvider, Client, FetchLike, Transport } from '@modelcontextprotocol/client'
 import { withDeadline } from './deadline.ts'
 import { McpLocalError } from './diagnostic.ts'
 import { createTransport } from './transport.ts'
@@ -30,11 +30,18 @@ export class McpGeneration {
    * @param config - resolved transport configuration.
    * @param timeoutMs - remaining operation budget; undefined leaves the SDK default.
    * @param ctx - context whose subprocess service starts a stdio server that names an identity.
+   * @param fetch - optional OAuth request wrapper bound to the active grant.
+   * @param authProvider - optional passive OAuth callbacks, tracked through actual settlement.
    * @returns completion of negotiation, or cancellation/deadline rejection.
    */
-  connect(config: Config, timeoutMs: number | undefined, ctx: Context): Promise<void> {
+  connect(
+    config: Config, timeoutMs: number | undefined, ctx: Context, fetch?: FetchLike, authProvider?: Required<AuthProvider>,
+  ): Promise<void> {
     this.lifetime.signal.throwIfAborted()
-    const transport = this.transport = createTransport(config, ctx)
+    const transport = this.transport = createTransport(config, ctx, fetch, authProvider === undefined ? undefined : {
+      token: () => this.run(() => authProvider.token()),
+      onUnauthorized: context => this.run(() => authProvider.onUnauthorized(context)),
+    })
     const close = transport.close.bind(transport)
     let closing: Promise<void> | undefined
     transport.close = () => closing ??= close()
@@ -59,7 +66,7 @@ export class McpGeneration {
   /** Reject when this generation was cancelled or its transport reported closure. */
   assertOpen(): void {
     this.lifetime.signal.throwIfAborted()
-    if (this.closeObserved) throw new McpLocalError('MCP transport closed')
+    if (this.closeObserved) throw new McpLocalError('MCP transport closed', 'MCP_CONNECTION_CLOSED')
   }
 
   /**
@@ -87,14 +94,15 @@ export class McpGeneration {
 
   /**
    * Cancel callers, close the transport, and await owned work within the cleanup budget.
+   * @param reason - error that cancelled callers receive; the first close decides it.
    * @returns the shared cleanup result, distinguishing transport closure from cleanup failure.
    */
-  close(): Promise<McpCloseResult> {
-    return this.closing ??= this.finish()
+  close(reason: Error = new McpLocalError('MCP connection closed', 'MCP_CONNECTION_CLOSED')): Promise<McpCloseResult> {
+    return this.closing ??= this.finish(reason)
   }
 
-  private async finish(): Promise<McpCloseResult> {
-    this.lifetime.abort(new McpLocalError('MCP connection closed'))
+  private async finish(reason: Error): Promise<McpCloseResult> {
+    this.lifetime.abort(reason)
     let cleanupError: string | undefined
     const work = async (): Promise<void> => {
       try {

@@ -11,7 +11,8 @@ import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { Converter } from '@deepseek-ai/libreoffice-kit'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import OfficeKit, { OfficeSourceKey, type OfficeKitRequest } from '../src/index.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import OfficeKit, { type OfficeSourceKey, type OfficeKitRequest } from '../src/index.ts'
 
 const kit = vi.hoisted(() => ({ create: vi.fn<() => Promise<Converter>>() }))
 vi.mock('@deepseek-ai/libreoffice-kit', () => ({ createConverter: kit.create }))
@@ -21,7 +22,7 @@ const FAKE_HELPER = fileURLToPath(new URL('./fixtures/fake-convert-helper.mjs', 
 const KIT_PDF = Buffer.from('%PDF-1.7\nin-process\n%%EOF\n')
 const HELPER_PDF = Buffer.from('%PDF-1.7\nfake helper\n%%EOF\n')
 const request: OfficeKitRequest = { extension: 'docx', priority: 'foreground', source: {
-  key: OfficeSourceKey('source'), version: 'v1', bytes: 4, read: async () => ({ bytes: new Uint8Array([80, 75, 3, 4]), version: 'v1' }),
+  key: brandString<OfficeSourceKey>('source'), version: 'v1', bytes: 4, read: async () => ({ bytes: new Uint8Array([80, 75, 3, 4]), version: 'v1' }),
 } }
 
 let ctx: Context

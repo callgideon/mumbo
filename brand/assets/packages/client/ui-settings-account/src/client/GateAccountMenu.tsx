@@ -7,6 +7,15 @@ import css from './AccountMenu.module.css'
 
 interface GateIdentity { email: string; name: string | null; picture: string | null }
 
+type GateMetadata = Record<string, string | undefined>
+
+/** The sign-in page's Supabase session metadata for `email`; throws when storage is blocked or holds another format. */
+function storedMetadata(email: string): GateMetadata {
+  const key = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k))
+  const stored = key === undefined ? null : JSON.parse(localStorage.getItem(key) ?? 'null') as { user?: { email?: string; user_metadata?: GateMetadata } } | null
+  return stored?.user?.email === email ? stored.user.user_metadata ?? {} : {}
+}
+
 /**
  * Read the gate session's email, plus name and picture from the sign-in page's Supabase session when this origin holds it.
  * @returns the identity, or null when the page is not behind the gate.
@@ -16,11 +25,9 @@ async function readIdentity(): Promise<GateIdentity | null> {
   if (!response.ok) return null
   const { email } = await response.json() as { email?: string }
   if (!email) return null
-  let meta: Record<string, string | undefined> = {}
+  let meta: GateMetadata = {}
   try {
-    const key = Object.keys(localStorage).find(k => /^sb-.+-auth-token$/.test(k))
-    const stored = key === undefined ? null : JSON.parse(localStorage.getItem(key) ?? 'null') as { user?: { email?: string; user_metadata?: typeof meta } } | null
-    if (stored?.user?.email === email) meta = stored.user.user_metadata ?? {}
+    meta = storedMetadata(email)
   } catch (_error) {
     // Storage may be blocked or hold another format; the email alone still identifies the account.
   }

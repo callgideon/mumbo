@@ -44,7 +44,7 @@ class HalfScaleModel extends LlmAdapter {
   }
 
   override imageRequestTarget(_provider: string, _model: string, image: ImageAttachmentRef): ImageRequestTarget {
-    return { width: image.width / 2, height: image.height / 2, maxBytes: image.bytes * 4 }
+    return { width: image.width / 2, height: image.height / 2, maxImageBytes: image.bytes * 4, imageTargetBytes: image.bytes * 4 }
   }
 
   async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {

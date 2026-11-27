@@ -25,20 +25,20 @@ id: 2026-11-05-mcp-message-source
 baseline: false
 changes:
   - root: "event:agent/inbox/spliced"
-    previous: "2026-10-27-retry-control-input"
-    after: "ac9cd191a7434ef0964ce1598f0881b4b2c8beabea02a7df6cacabde017d1162"
+    previous: "2026-11-19-cua-input-notices"
+    after: "e357a8bfad6fdeb0ce3effa1efd65c28a6a00523973d0927751baa15a32ab79b"
     decision: same-version
   - root: "event:developer/message"
-    previous: "2026-10-27-retry-control-input"
-    after: "94ced8dbc80cd7d35eb508b5b2784c87f94b1900594d5ae2242685f860f53509"
+    previous: "2026-11-19-cua-input-notices"
+    after: "1c767a5b76e084df1b0c6fba556f956fb2ddd94b740c3a9c4e37f003d325921a"
     decision: same-version
   - root: "event:session/title-llm-request"
-    previous: "2026-10-27-retry-control-input"
-    after: "8e938d968d77d8bd97c62ab9c16113518d2f0d43c946059855cdd6887d757002"
+    previous: "2026-11-19-cua-input-notices"
+    after: "998d11ebf99f2f0eaa7e78060fdee67e884eeecac710cb72c48de21f147c7c48"
     decision: same-version
   - root: "event:user/message"
-    previous: "2026-10-27-retry-control-input"
-    after: "349ba8a544d17196a4d447994432d2ab71df1539e4b37d985f03f424594c5d03"
+    previous: "2026-11-19-cua-input-notices"
+    after: "b2feaf7d2671df7132717a990cec141c76766f60da4fcb48daadf697f63d17d1"
     decision: same-version
 ```
 

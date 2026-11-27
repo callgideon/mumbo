@@ -14,6 +14,7 @@
     { "path": "../../llm/llm" },
     { "path": "../../subprocess/subprocess" },
     { "path": "../../core/tools" },
+    { "path": "../../util/brand" },
     { "path": "../../util/values" }
   ]
 }

@@ -26,7 +26,9 @@ const RULES: Array<[file: string, from: string, to: string]> = [
   // Packaged app.name (crash reports, macOS app menu, userData folder) comes from the manifest productName.
   ['apps/desktop/scripts/electron-builder-config.mjs', 'dshDesktopAppId: appId,', `productName: '${brand.productName}', dshDesktopAppId: appId,`],
   ['apps/desktop/scripts/desktop-package-environment.mjs', "'com.deepseek.harness'", `'${brand.appId}'`],
-  ['apps/desktop/scripts/desktop-auto-update-environment.mjs', "'https://download.deepseek.com'", `'${brand.updateOrigin}'`],
+  ['apps/desktop-publisher/src/desktop-auto-update-environment.mjs', "'https://download.deepseek.com'", `'${brand.updateOrigin}'`],
+  // The production publishing preset accepts only the same origin.
+  ['apps/desktop-publisher/src/desktop-publish-config.ts', "'https://download.deepseek.com'", `'${brand.updateOrigin}'`],
   ['packages/bundle/base/cordis.patch.yml', "'https://dsh-otel-collector.deepseeksvc.com/v1/logs'", `'${brand.telemetryOtlpUrl}'`],
   ['packages/host/product-telemetry-otel/src/index.ts', 'https://dsh-otel-collector.deepseeksvc.com/v1/logs', brand.telemetryOtlpUrl],
   // New-chat hero: no animated whale.
@@ -37,13 +39,14 @@ const RULES: Array<[file: string, from: string, to: string]> = [
   ['packages/client/ui-settings-account/src/client/index.ts', "import { AccountMenu } from './AccountMenu.tsx'", "import { AccountMenu } from './AccountMenu.tsx'\nimport { GateAccountMenu } from './GateAccountMenu.tsx'"],
   ['packages/client/ui-settings-account/src/client/index.ts', '  }, AccountMenu))', '  }, desktop ? AccountMenu : GateAccountMenu))'],
   // "Contact us" opens a DeepSeek feedback form.
-  ['packages/client/ui-settings-account/src/client/AccountMenu.tsx', "        { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> },", "        ...(Boolean(0) ? [{ id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineMedium size={16} /> }] : []),"],
+  ['packages/client/ui-settings-account/src/client/AccountMenu.tsx', "        { id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineRegular size={14} /> },", "        ...(Boolean(0) ? [{ id: 'contact', label: t('contactUs'), icon: <IconPaperPlaneOutlineRegular size={14} /> }] : []),"],
   // Web opens chats in the same compact view as Desktop.
   ['packages/client/ui-chat/src/client/apply.ts', "'dshDesktop' in globalThis ? 'standard' : DEFAULT_TRANSCRIPT_VIEW_MODE", "'standard' satisfies typeof DEFAULT_TRANSCRIPT_VIEW_MODE"],
 ]
 
 const TEXT_ROOTS = ['packages', 'apps', 'scripts/client-build-environment.ts']
-const SKIP = /(^|\/)(node_modules|lib|dist|tests?|__tests__|fixtures|snapshots|test-support|\.desktop-build)(\/|$)|\.(test|spec)\.|README|CHANGELOG|\.i18n\.yaml$/
+const SKIP_DIRECTORIES = 'node_modules|lib|dist|tests?|__tests__|fixtures|snapshots|test-support|\\.desktop-build'
+const SKIP = new RegExp(`(^|/)(${SKIP_DIRECTORIES})(/|$)|\\.(test|spec)\\.|README|CHANGELOG|\\.i18n\\.yaml$`)
 const NAMES: Array<[RegExp, string]> = [
   [/DeepSeek[ -][Hh]arness/g, brand.productName],
   [/(?<![\w@/.-])DeepSeek(?!\w)/g, brand.productName],

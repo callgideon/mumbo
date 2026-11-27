@@ -5,13 +5,14 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium, type Browser } from 'playwright'
 import { readProfileManifest } from '@deepseek-ai/dsh-app-boot'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-ptc-runtime'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
-import { load } from 'js-yaml'
+import { parseEntryYaml } from '@deepseek-ai/cordis-plugin-include'
 import { expect, it, vi } from 'vitest'
 import { captureStableAria, compareOrRefreshGolden, launchWebScaffold, webSnapshotMode, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspace } from './support.ts'
+import { brandString } from '@deepseek-ai/dsh-brand'
 
 // This fixture exercises the macOS provider’s permission setup.
 it.skipIf(process.platform !== 'darwin').each([
@@ -26,16 +27,17 @@ it.skipIf(process.platform !== 'darwin').each([
   try {
     const patch = join(directory, 'native-fixture.yml')
     // Permission inspection fails against this non-helper executable; activation still permits dismissing setup.
-    await writeFile(patch, JSON.stringify([{ id: 'cua', config: { helperPath: process.execPath } }]))
-    const defaults = join(directory, 'script-defaults')
-    if (script) {
-      await mkdir(defaults)
-      await writeFile(join(defaults, 'package.json'), JSON.stringify({ name: 'cua-script-defaults', version: '1.0.0', dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
-      await writeFile(join(defaults, 'cordis.patch.yml'), '- id: ptc-runtime\n  config:\n    executionMode: vm-script\n    scriptPersistence: false\n')
-    }
+    await writeFile(patch, JSON.stringify([{ id: 'cua-macos', config: { helperPath: process.execPath } }]))
+    // Both variants start without retained state so that the persistent-mode action has an effect.
+    const defaults = join(directory, 'ptc-defaults')
+    await mkdir(defaults)
+    await writeFile(join(defaults, 'package.json'), JSON.stringify({ name: 'cua-ptc-defaults', version: '1.0.0', dsh: { bundle: { patch: 'cordis.patch.yml' } } }))
+    await writeFile(join(defaults, 'cordis.patch.yml'), script
+      ? '- id: ptc-runtime\n  config:\n    executionMode: vm-script\n    scriptPersistence: false\n'
+      : '- id: ptc-runtime\n  config:\n    executionMode: per-call\n')
     const harnessHome = join(directory, 'home')
     const scaffold = ownedScaffold = await launchWebScaffold({
-      profile: { packages: script ? [{ dir: defaults, enabled: true }] : [] },
+      profile: { packages: [{ dir: defaults, enabled: true }] },
       harnessHome, extraOverlayPath: [
         fileURLToPath(new URL('./pin-browse-picker.overlay.yml', import.meta.url)), patch,
       ] })
@@ -62,7 +64,7 @@ it.skipIf(process.platform !== 'darwin').each([
     let toggle = card.getByRole('switch', { name: 'Enable Computer use', exact: true })
     const originalAgent = scaffold.ctx.agents.list()[0]!
     const ptcAgent = (await scaffold.ctx.agents.create({
-      sessionId: SessionId('cua-existing-ptc'),
+      sessionId: brandString<SessionId>('cua-existing-ptc'),
       setup: async (ctx) => { await scaffold.ctx.agentPresets.mount(ctx, 'ptc') },
     })).agent
     expect(scaffold.ctx.tools.schemas(ptcAgent).some(tool => tool.name === 'cua')).toBe(false)
@@ -111,7 +113,8 @@ it.skipIf(process.platform !== 'darwin').each([
     expect(await card.getByText('Experimental', { exact: true }).count()).toBe(1)
     expect(await card.textContent()).not.toContain('Make PTC mode persistent')
     expect(await card.textContent()).not.toContain('Switch to PTC mode')
-    expect(await card.textContent()).toContain('On Windows, npm installations require a separately configured helper')
+    expect(await card.textContent()).toContain('Allow the agent to directly control applications on your computer.')
+    expect(await card.textContent()).not.toContain('helper')
     expect(await card.textContent()).not.toContain('Swift')
     const description = await card.getByRole('button', { name: 'View Computer use', exact: true }).evaluate((button) => {
       const element = document.getElementById(button.getAttribute('aria-describedby')!)!
@@ -136,7 +139,7 @@ it.skipIf(process.platform !== 'darwin').each([
       expect(scaffold.ctx.tools.schemas(originalAgent).some(tool => tool.name === 'cua_run_code')).toBe(preset !== 'ptc')
     }
     const child = await scaffold.ctx.agents.create({
-      sessionId: SessionId('cua-child'),
+      sessionId: brandString<SessionId>('cua-child'),
       setup: (ctx) => { scaffold.ctx.agentPresets.composeFrom(ctx, ptcAgent.ctx) },
     })
     expect(scaffold.ctx.tools.schemas(child.agent).some(tool => tool.name === 'cua')).toBe(true)
@@ -154,27 +157,32 @@ it.skipIf(process.platform !== 'darwin').each([
     expect(scaffold.ctx.settings.describe().find(row => row.ns === 'ui-settings')?.value).toMatchObject({ enabled: codingTools })
     expect(saved).not.toContain('executionMode:')
     if (selectedDefault === undefined) {
-      expect(load(saved)).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'agent-preset-registry' })]))
+      expect(parseEntryYaml(saved)).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'agent-preset-registry' })]))
     } else {
-      expect(load(saved)).toEqual(expect.arrayContaining([
+      expect(parseEntryYaml(saved)).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: 'agent-preset-registry', config: { default: 'standard', selectedDefault } }),
       ]))
     }
     const freshDefault = (await scaffold.ctx.agents.create({
-      sessionId: SessionId('cua-new-default'),
+      sessionId: brandString<SessionId>('cua-new-default'),
       setup: async (ctx) => { await scaffold.ctx.agentPresets.mount(ctx) },
     })).agent
     expect(scaffold.ctx.agentPresets.composedPreset(freshDefault.ctx)).toBe(initialDefault)
     expect(scaffold.ctx.tools.schemas(freshDefault).some(tool => tool.name === 'cua')).toBe(false)
     expect(scaffold.ctx.tools.schemas(freshDefault).some(tool => tool.name === 'cua_run_code')).toBe(true)
     const fresh = (await scaffold.ctx.agents.create({
-      sessionId: SessionId('cua-new-ptc'),
+      sessionId: brandString<SessionId>('cua-new-ptc'),
       setup: async (ctx) => { await scaffold.ctx.agentPresets.mount(ctx, 'ptc') },
     })).agent
     expect(scaffold.ctx.agentPresets.composedPreset(fresh.ctx)).toBe('ptc')
     expect(scaffold.ctx.tools.schemas(fresh).some(tool => tool.name === 'cua')).toBe(true)
     await card.getByRole('button', { name: 'View Computer use', exact: true }).click()
-    await plugins.locator('[data-detail-document]').getByText('helperPath', { exact: true }).waitFor()
+    const detail = plugins.locator('[data-detail-document]')
+    await detail.getByRole('img', { name: 'A request to add meeting notes and the resulting text in Notes' }).waitFor()
+    const guidance = plugins.locator('[data-cua-guidance]')
+    await guidance.getByText(/Use caution in production environments/).waitFor()
+    expect(await guidance.textContent()).not.toContain('helperPath')
+    expect(await detail.textContent()).not.toContain('PTC')
     toggle = page.locator('[data-plugin-panel]').getByRole('switch', { name: 'Enable Computer use', exact: true })
     const persistent = page.getByRole('group', { name: 'PTC execution mode', exact: true })
     if (!codingTools) {
@@ -253,7 +261,7 @@ it.skipIf(process.platform !== 'darwin').each([
     expect(scaffold.ctx.agentPresets.composedPreset(originalAgent.ctx)).toBe(initialDefault)
     expect(scaffold.ctx.agentPresets.composedPreset(freshDefault.ctx)).toBe(initialDefault)
     const confirmed = (await scaffold.ctx.agents.create({
-      sessionId: SessionId('cua-confirmed-default'),
+      sessionId: brandString<SessionId>('cua-confirmed-default'),
       setup: async (ctx) => { await scaffold.ctx.agentPresets.mount(ctx) },
     })).agent
     expect(scaffold.ctx.agentPresets.composedPreset(confirmed.ctx)).toBe('ptc')
@@ -262,7 +270,7 @@ it.skipIf(process.platform !== 'darwin').each([
     expect(scaffold.ctx.tools.schemas(ptcAgent).some(tool => tool.name === 'cua')).toBe(true)
     expect((await runtime.run(runtime.resolve({ program, bindings: [], stateOwner: owner }))).value).toBe(3)
     const confirmedSettings = await readFile(settingsPath, 'utf8')
-    expect(load(confirmedSettings)).toEqual(expect.arrayContaining([
+    expect(parseEntryYaml(confirmedSettings)).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'agent-preset-registry', config: { default: 'standard', selectedDefault: 'ptc' } }),
     ]))
     await toggle.click()

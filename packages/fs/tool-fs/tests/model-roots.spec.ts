@@ -3,6 +3,7 @@
  * real local provider: inside the roots the tools work, outside them each tool returns the
  * pinned refusal and the file on disk is untouched.
  */
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -55,6 +56,7 @@ beforeEach(async () => {
   await writeFile(join(workspace, 'notes.txt'), 'inside\n')
   ctx = new Context()
   provideWorkingDirectoryFixture(ctx)
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(NativeToolExecutor)
@@ -129,6 +131,7 @@ describe.runIf(process.platform === 'linux')('model file tools under read-only r
     ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SessionProjectionRegistry)
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
     await ctx.plugin(NativeToolExecutor)
