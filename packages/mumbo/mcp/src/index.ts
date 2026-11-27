@@ -162,6 +162,8 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     yield ctx.webServer.register({
       kind: 'exact',
       path: ROUTE_PATH,
+      // The caller presents no browser credential: the handler verifies the bearer key and the principal itself.
+      auth: 'anonymous',
       handler: async (request, response) => {
         const handling = handle(request, response)
         admitted.add(handling)

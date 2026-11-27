@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
-import type { BrowserAuth } from '@deepseek-ai/dsh-client-connection/src/browser-auth.ts'
+import { ConnectionAuthentication, HostConnectionService, type ConnectionFetchAccessRequest } from '@deepseek-ai/dsh-client-connection'
 import { FsError, type FsTargetKey, type FsVersion } from '@deepseek-ai/dsh-fs'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { LocalFileSystem } from '@deepseek-ai/dsh-fs-local'
@@ -266,7 +265,8 @@ describe('SessionMediaReferences /api/file', () => {
   it('serves a non-owner only with hostFiles/readAny on the global resource', async () => {
     const ctx = new Context()
     contexts.push(ctx)
-    const connection = new HostConnectionService(ctx, [], {} as BrowserAuth)
+    new ConnectionAuthentication(ctx)
+    const connection = new HostConnectionService(ctx, [])
     ctx.provide('attachments', { imageLimits: { maxImageBytes: DEFAULT_LIMIT } } as never)
     await ctx.plugin(LocalFileSystem, { cwd: root }).await()
     await ctx.plugin(SessionMediaReferences).await()

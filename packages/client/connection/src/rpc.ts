@@ -117,6 +117,16 @@ export interface AuthenticationProvider {
   authenticate(request: ConnectionTrustRequest): PeerScope | undefined
 }
 
+/** Placement of one credential verifier among the registered ones. */
+export interface AuthenticationRegistrationOptions {
+  /**
+   * `'first'` places the verifier ahead of every verifier registered so far, so its Peer decides a request that also
+   * carries a credential another verifier accepts; a later `'first'` registration goes ahead of an earlier one.
+   * Omitted, the verifier is appended. A verifier that returns no Peer never stops the ones after it.
+   */
+  readonly precedence?: 'first'
+}
+
 /** Outcome of admitting one request: the Peer it speaks for, or the status refusing it. */
 export type PeerAdmission =
   | { readonly peer: PeerScope }

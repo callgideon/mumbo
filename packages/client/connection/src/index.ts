@@ -15,6 +15,7 @@ import type { ConnectionConfig } from './types.ts'
 
 export type {
   AuthenticationProvider,
+  AuthenticationRegistrationOptions,
   PeerAdmission,
   ConnectionFetchAccessRequest,
   ConnectionFetchAuthorizer,
@@ -129,6 +130,8 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         kind: 'prefix',
         path: API_PATH,
         auth: 'required',
+        // Non-owner Peers reach the shared channel; the interceptor and each exact route's `access` decide per request.
+        access: 'non-owner',
         handler: async (req, res, peer) => {
           if (peer === undefined || res.destroyed) return
           await webCtx.waterfall('connection/request', req, res, () => bridge(req, res, fetchHandler, peer, maxRequestBodyBytes))

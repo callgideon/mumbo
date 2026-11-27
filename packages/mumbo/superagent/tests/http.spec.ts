@@ -1,5 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import * as Connection from '@deepseek-ai/dsh-client-connection'
+import * as AuthenticationToken from '@deepseek-ai/dsh-host-authentication-token'
+import type { WebEntryUrl } from '@deepseek-ai/dsh-host-webserver'
 import { expect, it } from 'vitest'
 import { z } from 'zod'
 import { registerHttp } from '../src/app/http.ts'
@@ -135,26 +137,32 @@ it('admits through the real DSH Connection: its Host and Origin checks, the owne
     register: (route: { path: string; handler: Handler }) => { routes.set(route.path, route.handler); return () => { routes.delete(route.path) } } } as never)
   const fiber = ctx.plugin({ inject: [...Connection.inject], apply: Connection.apply }, { trustedHosts: [box] })
   await fiber.await()
+  // Owner credentials: the Token Provider, as the Web application mounts it beside Connection.
+  await ctx.plugin(AuthenticationToken).await()
   try {
     const connection = ctx.get('connection')!
-    // Stands in for the edge-member authenticator (whose header checks its own tests cover), but returns a member's
-    // Peer after disposal too, so the route's own live-Peer check is what refuses it.
+    // Stands in for the edge-member Provider (whose header checks its own tests cover), but returns a member's
+    // Peer after disposal too; Connection admits no disposed Peer, so the request is unauthenticated.
     const members = new Map<string, Connection.PeerScope>()
-    connection.authenticators.register(request => {
+    connection.authentication.register({ authenticate: (request) => {
       const email = (request.headers as Headers)['x-test-member']
       if (email === undefined) return undefined
       if (!members.has(email)) members.set(email, connection.createPeer({ principal: { kind: 'edge-member', email } as never }))
       return members.get(email)
-    })
+    } })
     const unsubscribed: string[] = []
     registerHttp(ctx, { ready: Promise.resolve(), machine: { panelAdmins: ['alice@example.com'] }, sessions: { delivery: async () => 'injected' },
       engine: { unsubscribe: (key: string) => { unsubscribed.push(key); return true } } } as never)
     const post = (headers: Headers) => send(routes.get('/orchestrator')!, 'POST', 'threads/github%3A1/unsubscribe', undefined,
       { host: box, origin: `https://${box}`, ...headers })
-    const token = new URL(connection.authenticatedUrl(`https://${box}`))
+    // The Token plugin exchanges its entry URL for the owner's cookie ahead of route dispatch.
+    const entries: WebEntryUrl[] = []
+    ctx.emit(ctx.webServer, 'webserver/entry-url', `https://${box}`, entries)
+    const token = new URL(entries[0]!.url)
     let cookie = ''
-    connection.authorizeIndex({ method: 'GET', url: `${token.pathname}${token.search}`, headers: { host: box } },
-      { writeHead: (_status, headers) => { cookie = headers?.['set-cookie']?.split(';', 1)[0] ?? '' }, end: () => {} })
+    await ctx.waterfall(ctx.webServer, 'webserver/request', { method: 'GET', url: `${token.pathname}${token.search}`, headers: { host: box } } as never,
+      { writeHead: (_status: number, headers?: Record<string, string>) => { cookie = headers?.['set-cookie']?.split(';', 1)[0] ?? '' }, end: () => {} } as never,
+      async () => {})
     expect(cookie).not.toBe('')
     expect(await post({})).toMatchObject({ status: 401 })
     expect(await post({ host: 'evil.example', cookie })).toMatchObject({ status: 403 })
@@ -165,7 +173,7 @@ it('admits through the real DSH Connection: its Host and Origin checks, the owne
     expect(await post({ 'x-test-member': 'alice@example.com' })).toMatchObject({ status: 200 })
     expect(unsubscribed).toHaveLength(2)
     await members.get('alice@example.com')!.dispose()
-    expect(await post({ 'x-test-member': 'alice@example.com' })).toMatchObject({ status: 403 })
+    expect(await post({ 'x-test-member': 'alice@example.com' })).toMatchObject({ status: 401 })
     expect(unsubscribed).toHaveLength(2)
   } finally { await fiber.dispose() }
 })

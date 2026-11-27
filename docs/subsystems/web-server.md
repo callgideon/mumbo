@@ -21,6 +21,8 @@ interface WebRoute {
   handler: (req: IncomingMessage, res: ServerResponse, peer?: PeerScope) => void | Promise<void>
   /** Defaults to required. Anonymous handlers may receive no Peer. */
   auth?: WebAuthenticationRule
+  /** Omitted, a non-owner Peer is answered 403 before the handler runs. */
+  access?: WebRouteAccess
 }
 ```
 
@@ -43,8 +45,12 @@ interface WebResourceRoute {
   resource: WebResource
   /** Defaults to required; in-process reads still enforce deny. */
   auth?: WebAuthenticationRule
+  /** Omitted, a non-owner Peer is answered 403 over HTTP; an in-process read serves the Peer its caller admitted. */
+  access?: WebRouteAccess
 }
 ```
+
+`access: 'non-owner'` admits every authenticated Peer to one route, fallback, or upgrade, and that registration decides what each principal may do. Without it the carrier answers a Peer whose principal is not the owner 403 before the registration runs.
 
 All `webserver/*` events use the corresponding WebServer as their dispatch subject, including `index-inject` and `entry-url`. Ordinary listeners match the emitter's `webServer` isolation; explicit `{ global: true }` listeners bypass that filter. Passing a Peer as event data does not select listeners. Custom carriers and application emitters must supply the WebServer subject.
 
@@ -144,7 +150,7 @@ createSharedFetchHandler(channel: '/api'): ConnectionFetchHandler
 /**
  * Apply Host/Origin checks and admit the first live Peer returned by a registered credential verifier.
  * @param request - request headers from the HTTP or upgrade request.
- * @returns the admitted Peer, or the rejection status.
+ * @returns the credential's Peer, or the rejection status.
  */
 admit(request: ConnectionTrustRequest): PeerAdmission
 
@@ -168,11 +174,12 @@ Credential verifier registry whose registrations belong to the calling plugin.
 
 ```ts cordis-catalog
 /**
- * Add a credential verifier after the existing registrations.
+ * Add a credential verifier after the existing registrations, or ahead of them with `precedence: 'first'`.
  * @param provider - verifier owning its credential and Peer selection.
+ * @param options - placement among the existing registrations; omitted appends.
  * @returns disposer withdrawing this registration; the calling scope also withdraws it on unload.
  */
-register(provider: AuthenticationProvider): () => Promise<void>
+register(provider: AuthenticationProvider, options?: AuthenticationRegistrationOptions): () => Promise<void>
 
 /**
  * Verify credentials without applying an HTTP response or source policy.
@@ -182,7 +189,7 @@ register(provider: AuthenticationProvider): () => Promise<void>
 authenticate(request: ConnectionTrustRequest): PeerAdmission
 ```
 
-Types: [AuthenticationProvider](../../packages/client/connection/README.md#browser-authentication-and-request-trust)
+Types: [AuthenticationProvider](../../packages/client/connection/README.md#browser-authentication-and-request-trust) · [AuthenticationRegistrationOptions](../../packages/client/connection/README.md#browser-authentication-and-request-trust)
 
 Source: [`packages/client/connection/src/authentication.ts`](../../packages/client/connection/src/authentication.ts)
 

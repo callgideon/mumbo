@@ -1059,6 +1059,36 @@ describe('non-owner authentication Providers', () => {
     } finally { await token.dispose(); await connection.dispose() }
   })
 
+  it('asks a Provider registered with precedence first before the earlier ones, and the latest such Provider before all', async () => {
+    const host = await mounted()
+    try {
+      const asked: string[] = []
+      const peers = new Map<string, PeerScope>()
+      const register = (name: string, options?: { readonly precedence: 'first' }): void => {
+        peers.set(name, host.ctx.connection.createPeer({ principal: { kind: 'test-member', name } }))
+        host.ctx.connection.authentication.register({
+          authenticate(request) {
+            asked.push(name)
+            return new Headers(request.headers as Record<string, string>).get('x-test-accept') === name ? peers.get(name) : undefined
+          },
+        }, options)
+      }
+      register('appended')
+      register('first', { precedence: 'first' })
+      register('later-first', { precedence: 'first' })
+      const cookie = await browserCookie(host.ctx, 'localhost')
+      // The owner cookie is valid too, and the Token Provider registered before all three.
+      const admit = (accept: string) => host.connection.admit(fakeRequest({ host: 'localhost', cookie, 'x-test-accept': accept }))
+      expect(admit('first')).toEqual({ peer: peers.get('first') })
+      expect(asked).toEqual(['later-first', 'first'])
+      asked.length = 0
+      // A Provider ahead of the others that returns no Peer leaves the decision to them, in their order.
+      const owner = admit('appended')
+      expect('peer' in owner ? owner.peer.principal : owner).toEqual({ kind: 'owner' })
+      expect(asked).toEqual(['later-first', 'first'])
+    } finally { await host.dispose() }
+  })
+
   it('consults Providers in registration order and passes over an undefined answer', async () => {
     const host = await mounted()
     try {

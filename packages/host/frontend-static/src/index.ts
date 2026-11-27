@@ -135,6 +135,8 @@ export function apply(ctx: Context, config: Config): void {
       const target = resolve(normalize(join(distRoot, decodeURIComponent(request.url.pathname))))
       return target === distRoot || target === distIndex ? 'required' : 'anonymous'
     },
+    // The index is rendered for the admitted Peer, owner or not; the assets need no Peer.
+    access: 'non-owner',
     resource: (request, peer) => {
       request.signal.throwIfAborted()
       const target = resolve(normalize(join(distRoot, decodeURIComponent(new URL(request.url).pathname))))

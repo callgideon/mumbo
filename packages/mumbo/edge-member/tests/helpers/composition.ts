@@ -8,7 +8,11 @@ import Group from '@deepseek-ai/cordis-plugin-group'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { Remote, TypertRemoteService, principalOf, type Principal } from '@deepseek-ai/dsh-typert-protocol'
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { onTestFinished } from 'vitest'
 
 /** Stands in for the Session Controller's methods: records the caller the Gateway admitted. */
 export class PromptProbe extends TypertRemoteService {
@@ -45,7 +49,8 @@ export class PromptProbe extends TypertRemoteService {
 }
 
 /**
- * Start a real Loader over one cordis.yml whose plugin names resolve only from `modules`.
+ * Start a real Loader over one cordis.yml whose plugin names resolve only from `modules`. The Loader reads a copy
+ * in a temp directory removed with the test, because it writes a row a test disposes or reloads back to its file.
  * @param ctx - root Context already holding the services the fixture's rows inject but do not load.
  * @param config - absolute path of the cordis.yml fixture.
  * @param modules - the module each plugin name in the fixture loads.
@@ -67,7 +72,11 @@ export async function startLoader(
       return module
     }
   }
-  const settled = loader.create({ name: 'cordis:include', config: { path: pathToFileURL(config).href } }).then(() => loader.await())
+  const directory = mkdtempSync(join(tmpdir(), 'mumbo-edge-member-'))
+  onTestFinished(() => { rmSync(directory, { recursive: true, force: true }) })
+  const copy = join(directory, 'cordis.yml')
+  copyFileSync(config, copy)
+  const settled = loader.create({ name: 'cordis:include', config: { path: pathToFileURL(copy).href } }).then(() => loader.await())
   return { loader, settled }
 }
 

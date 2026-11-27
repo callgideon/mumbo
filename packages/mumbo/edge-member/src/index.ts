@@ -105,13 +105,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
   const peers = new MemberPeers(email => ctx.connection.createPeer({ principal: { kind: 'edge-member', email } }))
   ctx.effect(() => () => { peers.clear() }, 'mumbo-edge-member: member Peers')
+  // A request the edge signed for a member is that member's even when it also carries the owner's cookie, whichever
+  // plugin loaded or reloaded first; without a valid header this Provider returns no Peer and the others decide.
   ctx.connection.authentication.register({
     authenticate(request) {
       const value = headerValue(request)
       const member = value === undefined ? undefined : verifyMemberHeader(key, value, Math.floor(Date.now() / 1000))
       return member === undefined ? undefined : peers.admit(member.email, member.expiry)
     },
-  })
+  }, { precedence: 'first' })
 
   attributeMemberMessages(ctx)
 }

@@ -281,6 +281,8 @@ export class TypertGatewayService extends Service implements TypertGateway {
           const route: WebUpgradeRoute = {
             path: REMOTE_STREAM_MUX_PATH,
             auth: 'required',
+            // Streams of the shared channel: remote access decides each stream a non-owner Peer opens.
+            access: 'non-owner',
             handler: (req, socket, head, peer) => {
               mux.handleUpgrade(req, socket, head, peer as PeerScope)
             },

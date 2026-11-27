@@ -1,5 +1,5 @@
-# Test-only person box Host: the Web carrier, Connection, the Gateway with remote access, the project member
-# authenticator, and the box links with the Browser tab's Chrome control.
+# Test-only person box Host: the Web carrier, Connection, the Token Provider, the Gateway with remote access, the
+# project member Provider, and the box links with the Browser tab's Chrome control.
 - id: typert-registry
   name: '@deepseek-ai/dsh-typert-registry'
 - id: remote-access
@@ -13,6 +13,8 @@
     port: 0
 - id: client-connection
   name: '@deepseek-ai/dsh-client-connection'
+- id: authentication-token
+  name: '@deepseek-ai/dsh-host-authentication-token'
 - id: mumbo-edge-member
   name: '@mumbo/edge-member'
   config:

@@ -265,6 +265,55 @@ describe('real Loader composition', () => {
     expect(handler).not.toHaveBeenCalled()
   })
 
+  it('refuses a non-owner Peer on every route, fallback, and upgrade that declares no access, and serves the owner', async () => {
+    const ctx = await loadComposition()
+    const server = ctx.webServer
+    const peerOf = (kind: string): PeerScope => ({
+      // Other packages merge non-owner kinds into PrincipalMap; this package declares the owner alone.
+      id: kind as PeerScope['id'], ctx, principal: { kind } as PeerScope['principal'], signal: new AbortController().signal,
+      interactions: 'none', async dispose() {},
+    })
+    const peers: Record<string, PeerScope> = { owner: peerOf('owner'), guest: peerOf('test-guest') }
+    ctx.on('webserver/authorize', (incoming) => {
+      const peer = incoming.headers instanceof Headers ? undefined : peers[String(incoming.headers['x-test-peer'])]
+      return peer === undefined ? { kind: 'deny', status: 401 } : { kind: 'allow', peer }
+    })
+    const reached: string[] = []
+    const handler = (name: string): WebRoute['handler'] => (_req, res, peer) => { reached.push(`${name}:${String(peer?.id)}`); res.end(name) }
+    const switching = (name: string): Parameters<typeof server.registerUpgrade>[0]['handler'] => (_req, socket, _head, peer) => {
+      reached.push(`${name}:${String(peer?.id)}`)
+      socket.end('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: dsh-test\r\n\r\n')
+    }
+    server.register({ kind: 'exact', path: '/owner', handler: handler('owner-route') })
+    server.register({ kind: 'prefix', path: '/shared', access: 'non-owner', handler: handler('shared-route') })
+    // An anonymous route that an authorization listener still gives a Peer applies the same rule.
+    server.register({ kind: 'exact', path: '/open', auth: 'anonymous', handler: handler('open-route') })
+    server.registerUpgrade({ path: '/owner', handler: switching('owner-upgrade') })
+    server.registerUpgrade({ path: '/shared', access: 'non-owner', handler: switching('shared-upgrade') })
+    const release = server.registerFallback({ handler: handler('owner-fallback') })
+    const get = (path: string, peer: string) => request(server.port, path, { headers: { 'x-test-peer': peer } })
+    const exchange = (path: string, peer: string) => rawExchange(server.port,
+      `GET ${path} HTTP/1.1\r\nHost: localhost\r\nx-test-peer: ${peer}\r\nConnection: Upgrade\r\nUpgrade: dsh-test\r\n\r\n`)
+
+    for (const path of ['/owner', '/open', '/unmatched']) {
+      const refused = await get(path, 'guest')
+      expect({ status: refused.status, body: refused.body, cache: refused.headers.get('cache-control') }, path)
+        .toEqual({ status: 403, body: 'forbidden', cache: 'no-store' })
+    }
+    expect(await exchange('/owner', 'guest')).toMatch(/^HTTP\/1\.1 403 Forbidden\r\n/u)
+    expect(reached).toEqual([])
+    expect((await get('/shared/x', 'guest')).status).toBe(200)
+    expect(await exchange('/shared', 'guest')).toContain('101 Switching Protocols')
+    release()
+    server.registerFallback({ access: 'non-owner', handler: handler('shared-fallback') })
+    expect((await get('/unmatched', 'guest')).status).toBe(200)
+    expect((await get('/owner', 'owner')).status).toBe(200)
+    expect(await exchange('/owner', 'owner')).toContain('101 Switching Protocols')
+    expect(reached).toEqual([
+      'shared-route:test-guest', 'shared-upgrade:test-guest', 'shared-fallback:test-guest', 'owner-route:owner', 'owner-upgrade:owner',
+    ])
+  })
+
   it('authenticates matched HTTP routes once and forwards the admitted Peer', async () => {
     const ctx = await loadComposition()
     const server = ctx.webServer

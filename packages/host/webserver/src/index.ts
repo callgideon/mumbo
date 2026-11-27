@@ -110,6 +110,14 @@ export type WebAuthenticationRule = WebAuthPolicy | ((request: WebAuthRequest) =
 /** First authorization decision; authenticated access requires a live Peer. */
 export type WebAdmission = { kind: 'allow'; peer?: PeerScope } | { kind: 'deny'; status: 401 | 403 | 503 }
 
+/**
+ * Opt-in admitting non-owner Peers to one route, fallback, or upgrade. Omitted, only a Peer whose principal is the
+ * owner reaches the registration and every other admitted Peer is answered 403, as an exact Connection Fetch route
+ * without `access` answers it. With `'non-owner'` every admitted Peer reaches it, and the registration decides what
+ * each principal may do.
+ */
+export type WebRouteAccess = 'non-owner'
+
 /** Route match kind: 'exact' matches the pathname verbatim; 'prefix' p matches p and p/<anything>. */
 export type WebRouteKind = 'exact' | 'prefix'
 
@@ -122,6 +130,8 @@ export interface WebRoute {
   handler: (req: IncomingMessage, res: ServerResponse, peer?: PeerScope) => void | Promise<void>
   /** Defaults to required. Anonymous handlers may receive no Peer. */
   auth?: WebAuthenticationRule
+  /** Omitted, a non-owner Peer is answered 403 before the handler runs. */
+  access?: WebRouteAccess
 }
 
 /**
@@ -140,10 +150,12 @@ export interface WebResourceRoute {
   resource: WebResource
   /** Defaults to required; in-process reads still enforce deny. */
   auth?: WebAuthenticationRule
+  /** Omitted, a non-owner Peer is answered 403 over HTTP; an in-process read serves the Peer its caller admitted. */
+  access?: WebRouteAccess
 }
 
-/** The unmatched-request responder; omitted auth requires authentication. */
-export type WebFallback = Pick<WebRoute, 'handler' | 'auth'> | Pick<WebResourceRoute, 'resource' | 'auth'>
+/** The unmatched-request responder; omitted auth requires authentication, and omitted access admits only the owner. */
+export type WebFallback = Pick<WebRoute, 'handler' | 'auth' | 'access'> | Pick<WebResourceRoute, 'resource' | 'auth' | 'access'>
 
 /** One exact-path HTTP upgrade registration. */
 export interface WebUpgradeRoute {
@@ -153,6 +165,8 @@ export interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer, peer?: PeerScope) => void | Promise<void>
   /** Defaults to required. Anonymous handlers may receive no Peer. */
   auth?: WebAuthenticationRule
+  /** Omitted, a non-owner Peer is answered 403 before the socket reaches the handler. */
+  access?: WebRouteAccess
 }
 
 /**
@@ -632,7 +646,7 @@ export class WebServer extends Service {
           headers: req.headers, method: req.method, url: target, transport: 'http',
           signal: abort.signal, socket: req.socket,
         }
-        const admission = this.authorize(request, responder.auth)
+        const admission = this.authorize(request, responder.auth, responder.access)
         if (abort.signal.aborted || request.socket?.destroyed) return
         if (admission.kind === 'deny') {
           res.writeHead(admission.status, { 'Cache-Control': 'no-store' })
@@ -719,7 +733,7 @@ export class WebServer extends Service {
           const admission = this.authorize({
             headers: req.headers, method: req.method, url: target, transport: 'upgrade',
             signal: abort.signal, socket,
-          }, route.auth)
+          }, route.auth, route.access)
           if (abort.signal.aborted || socket.destroyed) return
           if (admission.kind === 'deny') {
             const reason = { 401: 'Unauthorized', 403: 'Forbidden', 503: 'Service Unavailable' }[admission.status]
@@ -781,7 +795,11 @@ export class WebServer extends Service {
     return typeof auth === 'function' ? auth(request) : auth ?? 'required'
   }
 
-  private authorize(request: WebAuthRequest, auth: WebAuthenticationRule | undefined): WebAdmission {
+  /**
+   * Admit one HTTP or upgrade request: resolve the policy, ask the authorization listeners, then refuse a non-owner
+   * Peer on a registration that declares no `access`.
+   */
+  private authorize(request: WebAuthRequest, auth: WebAuthenticationRule | undefined, access: WebRouteAccess | undefined): WebAdmission {
     const policy = this.authPolicy(auth, request)
     if (policy === 'deny') return { kind: 'deny', status: 403 }
     const admission: WebAdmission = this.ctx.bail(this, 'webserver/authorize', request, policy)
@@ -789,6 +807,8 @@ export class WebServer extends Service {
     if (admission.kind === 'allow') {
       if (policy === 'required' && admission.peer === undefined) return { kind: 'deny', status: 503 }
       if (admission.peer?.signal.aborted) return { kind: 'deny', status: 401 }
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- other packages merge non-owner kinds into PrincipalMap.
+      if (access === undefined && admission.peer !== undefined && admission.peer.principal.kind !== 'owner') return { kind: 'deny', status: 403 }
     }
     return admission
   }
