@@ -48,6 +48,10 @@
       "types": "./lib/types/tools.d.ts",
       "default": "./lib/types/tools.js"
     },
+    "./deny-list": {
+      "types": "./lib/types/deny-list.d.ts",
+      "default": "./lib/types/deny-list.js"
+    },
     "./tools/locale/*.json": "./locale/tools/*.json",
     "./locale/*.json": "./locale/*.json",
     "./diagnostic": {

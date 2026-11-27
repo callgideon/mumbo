@@ -8,10 +8,15 @@ import { HarnessError } from '@deepseek-ai/dsh-error'
  *   installation manifest could not be read or parsed; `cause` is the original error. Repair the
  *   profile files before retrying.
  * - `PLUGIN_MANAGER_UNAVAILABLE`: the manager was disposed before the change started.
+ * - `PLUGIN_MANAGER_BUNDLE_DENIED`: the deployment's deny list names the bundle, so it cannot be enabled.
+ * - `PLUGIN_MANAGER_PLUGIN_DENIED`: the deployment's deny list names the plugin row, so it cannot be enabled.
+ *   A change result reports either as an `operation-error` whose diagnostic is the message.
  */
 export const PLUGIN_MANAGER_ERROR_CODES = [
   'PLUGIN_MANAGER_PROFILE_READ_FAILED',
   'PLUGIN_MANAGER_UNAVAILABLE',
+  'PLUGIN_MANAGER_BUNDLE_DENIED',
+  'PLUGIN_MANAGER_PLUGIN_DENIED',
 ] as const
 
 /** One {@link PluginManagerError} code. */

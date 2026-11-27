@@ -19,7 +19,7 @@ import { readBundleDocument, readBundleImage, type BundleDetailOptions } from '.
 import { pluginEntryId, readPluginInventory } from '@deepseek-ai/dsh-host-plugin-inventory'
 import {
   readPluginMeta, readProfileManifest, resolveBundleDir, loadOverlayPatches, composeEntries,
-  readProfilePatches, bundlePatchPaths,
+  readProfilePatches, readProfileDenyList, bundlePatchPaths,
   evaluatePluginCompatibility, readProfileCompatibility, readProfileVersionExemptions,
   setProfileVersionExemption, validatePluginVersionExemption, PROFILE_COMPATIBILITY_FILENAME,
   getDshRuntimeVersion, ResolutionRestartRequired,
@@ -389,6 +389,8 @@ export class PluginManager extends TypertRemoteService {
     this.idleTimeoutMs = (config as Required<Config>).idleTimeoutMs
     this.pnpmCommand = (config as Required<Config>).pnpmCommand
     this.modelTools = (config as Required<Config>).modelTools
+    const { dropped } = readProfileState(() => readProfileDenyList('dsh', this.profile))
+    if (dropped.length > 0) ctx.logger.warn('this deployment does not allow %s; the profile enables them and they were not loaded', dropped.join(', '))
     this.versionListLimit = (config as Required<Config>).versionListLimit
     this.versionLookupConcurrency = (config as Required<Config>).versionLookupConcurrency
     this.configuredRegistries = {
@@ -937,7 +939,8 @@ export class PluginManager extends TypertRemoteService {
     throw new Error('no registry was asked')
   }
 
-  /** Persist a plugin entry's desired enablement and apply it on live profiles.
+  /** Persist a plugin entry's desired enablement and apply it on live profiles. Enabling a row on the profile's deny
+   * list fails with an `operation-error` whose diagnostic names the row.
    * @param id Loader entry identity returned by listPlugins.
    * @param enabled Whether the plugin should run.
    * @returns Saved and runtime outcomes, including higher-priority overrides.
@@ -948,6 +951,9 @@ export class PluginManager extends TypertRemoteService {
       const row = (await this.listPlugins()).find(item => item.entryId === id)
       if (row === undefined) throw new ManagementFailure('unknown-plugin')
       if (row.readOnlyReason !== undefined) throw new ManagementFailure(row.readOnlyReason)
+      if (enabled && readProfileDenyList('dsh', this.profile).rows.includes(row.patchId)) {
+        throw new PluginManagerError(`${row.patchId} cannot be enabled on this deployment.`, 'PLUGIN_MANAGER_PLUGIN_DENIED')
+      }
       await writePluginEnabled(this.profile, row.patchId, row.moduleName, enabled)
       Object.assign(result, await this.reload(enabled ? [row.patchId] : []))
       const current = (await this.listPlugins()).find(item => item.entryId === id)
@@ -955,7 +961,8 @@ export class PluginManager extends TypertRemoteService {
     }), { stage: 'enable', target: id, enabled }, 'plugin')
   }
 
-  /** Select or remove a bundle layer while retaining installed dependencies.
+  /** Select or remove a bundle layer while retaining installed dependencies. Enabling a bundle on the
+   * profile's deny list fails with an `operation-error` whose diagnostic names the bundle.
    * @param name Bundle package name.
    * @param enabled Whether the bundle contributes its patch layer.
    * @returns Persisted and runtime outcomes.
@@ -1285,6 +1292,9 @@ export class PluginManager extends TypertRemoteService {
   }
 
   private async selectBundle(name: string, enabled: boolean): Promise<void> {
+    if (enabled && readProfileDenyList('dsh', this.profile).bundles.includes(name)) {
+      throw new PluginManagerError(`${name} cannot be enabled on this deployment.`, 'PLUGIN_MANAGER_BUNDLE_DENIED')
+    }
     const manifest = readProfileManifest('dsh', this.profile.dir)
     const previous = bundleSelection(manifest)
     if (enabled || !previous.includes(name)) {

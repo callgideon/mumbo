@@ -103,6 +103,18 @@ The CLI exposes `dsh plugin --profile <profile> version-exemptions`, `allow-vers
 | `detailNpmFileSources` | `['jsdelivr', 'unpkg', 'npmmirror']` | npm file CDNs offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. |
 | `modelTools` | `true` | Offer the model the `plugin_manager` tool. A plugin it installs or enables runs in this process, so a contained deployment sets `false`; the tool then never registers and the person's plugin controls are unchanged. |
 
+<a id="deny-list"></a>
+### Deny list
+
+`@deepseek-ai/dsh-plugin-manager/deny-list` is the plugin of the profile row with id `plugin-deny-list`. Its config names what cannot be enabled in a deployment, for every caller, the owner included; the plugin validates the config and registers nothing.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `bundles` | `[]` | Bundle package names. `setBundleEnabled(name, true)` and an installation that would select one fail with `application: 'failed'` and an `operation-error` whose diagnostic is `<name> cannot be enabled on this deployment.` (`PLUGIN_MANAGER_BUNDLE_DENIED`); an installation leaves the package installed and not selected. A profile that already selects one starts without that bundle's rows. |
+| `rows` | `[]` | Row ids. `setPluginEnabled(id, true)` fails the same way (`PLUGIN_MANAGER_PLUGIN_DENIED`), and a `disabled` value other than `true` that the profile or home `cordis.patch.yml` gives a listed row is left out when the profile is composed. |
+
+[`readProfileDenyList`](../app-boot/README.md) reads the two lists from the composed row before plugins load, at every composition and every refusal, so a `!!js` value may read process facts such as `process.getuid()` and no service. It reads the row's config even when the row is disabled, because it runs before any plugin exists: disabling the row does not turn the list off. The manager logs one warning at start naming the bundles and rows the profile enables and composition left out; `dsh.profile.bundles` and the patch files keep them. Disabling and removing a listed entry stay allowed. A patch replaces a row's whole `config`, so a layer that patches this row's `config` replaces both lists: a deployment sets them in one layer and patches the row nowhere else. Command-line overlays are deliberately not filtered, because a deployment's own overlays arrive that way; one may enable a listed row.
+
 <a id="bundle-detail-documents"></a>
 ### Bundle detail documents
 
@@ -177,6 +189,7 @@ Tool results append to the transcript. Enabling or disabling other tools can cha
 - Package replacements require restarting the process without HMR. A package relinked outside Plugin Manager while it is still installed waits for a restart.
 - Startup-only profiles cannot remove packages used to start the current process; stop it and use `dsh plugin`.
 - The manager cannot disable its own management components, change another profile, or edit an agent preset's composition.
+- The [deny list](#deny-list) stops the one-click paths for the ids it names. `installBundle` and `updateBundle` are unchanged, so it is not a defence against an owner who installs other plugin code, edits a deployment overlay, or adds a row under another id. `listBundles()` and `listPlugins()` do not mark a listed entry, so the Plugins page still offers its switch and shows the refusal as the failure reason.
 - A failed removal may leave dependencies partially changed, and a failed or cancelled installation can leave downloaded files under `node_modules` or the pnpm store. Inactive dependencies with missing files remain removable. Diagnostic logs remain under the profile's `.plugin-manager/logs` directory.
 - Management results describe Host activation. Browser synchronization failures appear separately in the Plugins page's synchronization notice.
 - Desktop package operations remain owned by the Desktop shell.

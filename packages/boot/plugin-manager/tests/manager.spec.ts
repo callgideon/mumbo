@@ -11,7 +11,7 @@ import { execa } from 'execa'
 import type { Context } from '@deepseek-ai/cordis'
 import { afterAll, beforeAll, expect, it, onTestFinished, vi } from 'vitest'
 import {
-  boot, composeEntries, initProfile, loadProfileDirectory, readProfilePatches, readProfileManifest,
+  boot, composeEntries, initProfile, loadOverlayPatches, loadProfileDirectory, readProfileDenyList, readProfilePatches, readProfileManifest,
   reconcileProfilePatches, PluginPackages, readPluginMeta, getDshRuntimeVersion,
   type ProfileContext, type RuntimeResolution,
 } from '@deepseek-ai/dsh-app-boot'
@@ -22,6 +22,7 @@ import Hmr from '@deepseek-ai/dsh-hmr'
 import Timer from '@deepseek-ai/cordis-plugin-timer'
 import type { PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { Group } from '@deepseek-ai/cordis-plugin-loader'
+import * as DenyList from '../src/deny-list.ts'
 import * as operations from '../src/operations.ts'
 import * as githubConnection from '../src/github-connection.ts'
 import * as gitTransport from '../src/git-transport.ts'
@@ -33,7 +34,7 @@ let restoreGitCommandLineConfig: () => void
 beforeAll(() => { restoreGitCommandLineConfig = isolateGitCommandLineConfig() })
 afterAll(() => { restoreGitCommandLineConfig() })
 
-async function fixture(reload: 'live' | 'startup' = 'live', overlay = false, prepare?: (ctx: Context) => void, config: Config = {}, packageManager?: ProfileContext['packageManager'], prepareFiles?: (dir: string) => void, sourceInstallation = false) {
+async function fixture(reload: 'live' | 'startup' = 'live', overlay: boolean | unknown[] = false, prepare?: (ctx: Context) => void, config: Config = {}, packageManager?: ProfileContext['packageManager'], prepareFiles?: (dir: string) => void, sourceInstallation = false) {
   const temporaryHome = mkdtempSync(join(tmpdir(), 'plugin-manager-'))
   let owner: Context | undefined
   onTestFinished(async () => { await owner?.fiber.dispose(); rmSync(temporaryHome, { recursive: true, force: true }) })
@@ -64,7 +65,7 @@ async function fixture(reload: 'live' | 'startup' = 'live', overlay = false, pre
   writeFileSync(join(dir, 'cordis.yml'), '[]\n')
   prepareFiles?.(dir)
   const overlayPath = join(home, 'overlay.patch.yml')
-  writeFileSync(overlayPath, JSON.stringify(overlay ? [{ id: 'managed', disabled: true }] : []))
+  writeFileSync(overlayPath, JSON.stringify(Array.isArray(overlay) ? overlay : overlay ? [{ id: 'managed', disabled: true }] : []))
   const profile: ProfileContext = {
     name: 'test',
     ...(packageManager === undefined ? {} : { packageManager }),
@@ -2556,4 +2557,104 @@ it('reports profile read, lock, and disposal failures with error codes', async (
     name: 'PluginManagerError', code: 'PLUGIN_MANAGER_UNAVAILABLE',
   })
   expect(readFileSync(manifest, 'utf8')).toBe(saved)
+})
+
+/** The fork's base bundle rows for the manager and the deny list, with their `!!js` values, and the edge's patch of the manager row. */
+function shippedRows(): { rows: unknown[]; edge: unknown[] } {
+  const base = loadOverlayPatches('test', fileURLToPath(new URL('../../../bundle/base/cordis.patch.yml', import.meta.url))) as { insert?: { id: string; name: string }[] }[]
+  const shipped = base.flatMap(patch => patch.insert ?? [])
+  const edge = loadOverlayPatches('test', fileURLToPath(new URL('../../../../apps/cli/tests/fixtures/box-edge/containment-person.overlay.yml', import.meta.url)))
+    .filter(patch => patch.id === 'plugin-manager')
+  expect(edge).toEqual([{ id: 'plugin-manager', config: { modelTools: false } }])
+  return {
+    rows: [
+      { ...shipped.find(row => row.id === 'plugin-manager'), name: 'cordis:manager', disabled: false },
+      { ...shipped.find(row => row.id === 'plugin-deny-list'), name: 'cordis:denyList' },
+      // A row the bundles switch off under root, as they ship `remote-connection`.
+      { id: 'remote-connection', name: './plugin.mjs', disabled: { __jsExpr: 'process.getuid?.() === 0' }, config: { service: 'pairingProbe' } },
+    ],
+    edge,
+  }
+}
+
+/** A profile composed from {@link shippedRows} with the edge's manager patch as its overlay, for a dsh running as `uid`. */
+async function box(uid: number, reload: 'live' | 'startup', prepareFiles?: (dir: string) => void, prepare?: (ctx: Context) => void) {
+  const getuid = vi.spyOn(process, 'getuid').mockReturnValue(uid)
+  onTestFinished(() => { getuid.mockRestore() })
+  const { rows, edge } = shippedRows()
+  return fixture(reload, edge, (ctx) => { ctx.loader.builtins.denyList = DenyList; prepare?.(ctx) }, {}, undefined, (dir) => {
+    writeFileSync(join(dir, 'node_modules/core/cordis.patch.yml'), JSON.stringify([{ insert: rows }]))
+    prepareFiles?.(dir)
+  })
+}
+
+const DENIED = ['@deepseek-ai/dsh-experimental-forge-bundle', '@deepseek-ai/dsh-experimental-tool-worktree', '@deepseek-ai/dsh-deepseek-chat-import']
+const DENIED_ROWS = ['remote-connection', 'cli-account', 'upstream-skills']
+
+it.runIf(process.getuid !== undefined).each(['live', 'startup'] as const)(
+  'refuses the owner each denied bundle and row as root under the edge\'s manager patch, with %s reload', async (reload) => {
+    const { manager, dir, ctx } = await box(0, reload)
+    expect(manager.modelTools).toBe(false)
+    expect(readProfileDenyList('test', ctx.profileContext)).toEqual({ bundles: DENIED, rows: DENIED_ROWS, dropped: [] })
+    const before = [readFileSync(join(dir, 'package.json'), 'utf8'), readFileSync(join(dir, 'cordis.patch.yml'), 'utf8')]
+    // The names resolve to the workspace's own bundle packages.
+    for (const name of DENIED) {
+      expect(await manager.setBundleEnabled(name, true), name).toEqual({
+        stage: 'enable', target: name, enabled: true, changed: false, application: 'failed',
+        error: { code: 'operation-error', diagnostic: `${name} cannot be enabled on this deployment.` },
+      })
+    }
+    expect(await manager.setPluginEnabled('include:remote-connection' as PluginEntryId, true)).toEqual({
+      stage: 'enable', target: 'include:remote-connection', enabled: true, changed: false, application: 'failed',
+      error: { code: 'operation-error', diagnostic: 'remote-connection cannot be enabled on this deployment.' },
+    })
+    expect([readFileSync(join(dir, 'package.json'), 'utf8'), readFileSync(join(dir, 'cordis.patch.yml'), 'utf8')]).toEqual(before)
+    expect(ctx.get('pairingProbe')).toBeUndefined()
+    // Switching off stays allowed, and a bundle that is not listed is enabled as before.
+    expect(await manager.setPluginEnabled('include:remote-connection' as PluginEntryId, false)).toMatchObject({ application: reload === 'live' ? 'applied' : 'restart-required' })
+    expect(await manager.setBundleEnabled('extra', false)).toMatchObject({ changed: true })
+    expect(await manager.setBundleEnabled('extra', true)).toMatchObject({ changed: true, application: reload === 'live' ? 'applied' : 'restart-required' })
+  })
+
+it.runIf(process.getuid !== undefined)('starts a root profile that already enables a denied bundle and row without them, and warns once', async () => {
+  const warnings: unknown[][] = []
+  const { manager, dir, ctx } = await box(0, 'live', (dir) => {
+    // The name resolves to the workspace's own forge bundle, whose patch inserts the `worktree` and `forge` rows.
+    const manifest = readProfileManifest('test', dir)
+    manifest.dsh = { profile: { bundles: ['core', 'extra', DENIED[0]!] } }
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
+    writeFileSync(join(dir, 'cordis.patch.yml'), JSON.stringify([{ id: 'remote-connection', disabled: false }]))
+  }, (ctx) => {
+    ctx.logger.exporter({ levels: { default: 2 }, export: ({ type, args }) => { if (type === 'warn') warnings.push(args) } })
+  })
+  expect(manager.modelTools).toBe(false)
+  const forgeRows = (): string[] => [...ctx.loader.entries()].map(entry => entry.options.id).filter(id => ['worktree', 'forge'].includes(id))
+  expect([forgeRows(), ctx.get('pairingProbe'), ctx.get('managedProbe')]).toEqual([[], undefined, true])
+  expect(warnings.filter(args => String(args[0]).includes('does not allow'))).toEqual([
+    ['this deployment does not allow %s; the profile enables them and they were not loaded', `${DENIED[0]!}, remote-connection`],
+  ])
+  // The files keep the selection and the patch; a reload brings neither back.
+  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['core', 'extra', DENIED[0]])
+  expect(await manager.setBundleEnabled('extra', false)).toMatchObject({ changed: true, application: 'applied' })
+  expect([forgeRows(), ctx.get('pairingProbe'), ctx.get('managedProbe')]).toEqual([[], undefined, undefined])
+})
+
+it.runIf(process.getuid !== undefined)('lets a dsh that does not run as root enable each bundle and row the root list names', async () => {
+  const { manager, dir, ctx } = await box(1000, 'startup')
+  expect(readProfileDenyList('test', ctx.profileContext)).toEqual({ bundles: [], rows: [], dropped: [] })
+  // A startup-reload profile saves the selection without importing the bundles' rows.
+  for (const name of DENIED) expect(await manager.setBundleEnabled(name, true), name).toMatchObject({ changed: true, application: 'restart-required' })
+  expect(readProfileManifest('test', dir).dsh?.profile?.bundles).toEqual(['core', 'extra', ...DENIED])
+  expect(ctx.get('pairingProbe')).toBe(true)
+  expect(await manager.setPluginEnabled('include:remote-connection' as PluginEntryId, false)).toMatchObject({ changed: true, application: 'restart-required' })
+  expect(await manager.setPluginEnabled('include:remote-connection' as PluginEntryId, true)).toMatchObject({ changed: true, application: 'restart-required' })
+})
+
+it('validates the deny list row and gives neither it nor the manager a field Settings can write', () => {
+  expect(DenyList.Config({})).toEqual({ bundles: [], rows: [] })
+  // A list that is not an array, as a configuration file can write one.
+  expect(() => { Reflect.apply(DenyList.Config, undefined, [{ rows: 'remote-connection' }]) }).toThrow()
+  DenyList.apply()
+  // Settings writes volatile fields only.
+  for (const schema of [DenyList.Config, PluginManager.Config]) expect(JSON.stringify(schema.toJSON())).not.toContain('volatile')
 })
