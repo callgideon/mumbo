@@ -283,7 +283,7 @@ test('no edge overlay names the deny-list row or patches a preset\'s config; the
   for (const person of [true, false]) {
     for (const s of [script(c, person), containmentRows(c, person)]) {
       assert.ok(!/\bplugin-deny-list\b/.test(s), person ? 'person' : 'project')
-      assert.ok(!/- id: preset-(standard|ptc)\n\s+config:/.test(s), person ? 'person' : 'project')
+      assert.ok(!/- id: preset-(standard|ptc)\n(?:(?!\s*- id:).*\n)*?\s+config:/.test(s), person ? 'person' : 'project')
     }
     assert.match(containmentRows(c, person), /- id: plugin-manager\n\s+config:\n\s+modelTools: false\n/)
   }
