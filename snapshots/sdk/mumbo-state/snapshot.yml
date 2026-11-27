@@ -6,5 +6,5 @@ recording: authored
 header:
   class: sdk-mumbo-state
   pin: true
-  changes: 3
-  promptChanges: 1
+  changes: 2
+  promptChanges: 2
