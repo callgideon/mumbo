@@ -2774,7 +2774,8 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Not yet shown:</strong> nothing ran as root or booted as a box, no member turn used a real model, no browser check, and snapshots weren't replayed. <code>sdk/mumbo-state</code> and <code>web/mumbo-report-shell</code> still record the removed <code>working_directory</code> tool, so they fail replay until re-recorded with the key.</li>
 <li><strong>Throwaway smoke</strong> [2026-11-27, image <code>smoke-860e12c94f</code>, one person box started by the live edge's script as real root, then killed]: &quot;app clean 2&quot;, version 0.2.3-alpha.2, Node v24.22.3; no unresolved, pending or dropped line in the log; exactly one <code>token=</code> line; the door answers 200 with its key and 401 with a wrong one; <code>/pairing/</code> is 404; no <code>sessions.sqlite</code>. Production wasn't touched.
 <ul>
-<li>Still to run on a throwaway before the founder's box moves: a copy of the founder's backup opens under the new image with the same Session count, and the owner is refused the forge bundle and <code>remote-connection</code> over the API.</li>
+<li><strong>Owner refusals, live</strong> [2026-11-27]: over the API with the owner's cookie, enabling the forge bundle and <code>remote-connection</code> are both refused with &quot;cannot be enabled on this deployment&quot;, and dsh keeps running. The plugin list has 183 enabled entries, all active, and 48 disabled.</li>
+<li>Still to run on a throwaway before the founder's box moves: a copy of the founder's backup opens under the new image with the same Session count. It needs the founder's yes, since it copies their data into another box.</li>
 <li>Waiting for the merged image on real boxes: the member checks, a real model turn, and the stdio MCP server's user.</li>
 </ul>
 </li>
