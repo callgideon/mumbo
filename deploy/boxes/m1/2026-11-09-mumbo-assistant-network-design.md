@@ -1661,6 +1661,15 @@ The cache's worst case is a subscription that dies silently: copies are served f
     5. On bitlane, the Plugins page offers no Notion account, and a member's `connectorAccounts/start` is refused with its log line.
     6. Sign out, and the section shows not connected.
   - **For the founder to decide:** whether Notion deletes should be offered once approvals can cover them, and when to create the Slack app.
+- **B57, the chat floats over a fullscreen right panel** [2026-11-27, queued behind B55 and B56; not yet a ruling]: the founder's words reached mumbo through the bitloops session, not directly: "left panel - can have tabs like chrome / can me made full-screen - chat will become floating - like in codex", with "left" later corrected to the right side. mumbo confirms the scope with the founder before any plan.
+  - **Already there** [checked on main a3edaa5799]: the right Sidebar (`ui-sidebar-right` on `ui-dockkit`) has tabs, splits and a fullscreen presentation that covers the viewport without remounting tabs. The kit has floating panes (`FloatLayer`).
+  - **Missing:** in fullscreen the conversation is covered, so the person can't read or write to the chat. Nothing in the kit pins a tab.
+  - **Open, to settle in the design:**
+    - Whether the floating chat is the whole conversation or the composer with the latest turns.
+    - How it reuses the conversation's one editor per chat. A second mounted composer would split drafts. (A pointer from bitloops' study, not verified here.)
+    - Whether it applies to the automatic fullscreen on narrow screens, where the panel already replaces the chat.
+    - Whether tab pinning is wanted at all.
+  - bitloops sends its console design so both products follow one pattern. The design here starts when that and the founder's scope are in. It is client UI, so it follows `dsh-client-ui-ux` and ships with a GIF.
 
 **Acceptance (first milestone: the founder's box in Mumbai):**
 - **The move.** The founder's box runs in the `ap-south-1` cell, moved from `us-east-1` with Sessions, schedules, files and Chrome sign-ins intact.

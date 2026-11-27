@@ -2858,6 +2858,21 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>For the founder to decide:</strong> whether Notion deletes should be offered once approvals can cover them, and when to create the Slack app.</li>
 </ul>
 </li>
+<li><strong>B57, the chat floats over a fullscreen right panel</strong> [2026-11-27, queued behind B55 and B56; not yet a ruling]: the founder's words reached mumbo through the bitloops session, not directly: &quot;left panel - can have tabs like chrome / can me made full-screen - chat will become floating - like in codex&quot;, with &quot;left&quot; later corrected to the right side. mumbo confirms the scope with the founder before any plan.
+<ul>
+<li><strong>Already there</strong> [checked on main a3edaa5799]: the right Sidebar (<code>ui-sidebar-right</code> on <code>ui-dockkit</code>) has tabs, splits and a fullscreen presentation that covers the viewport without remounting tabs. The kit has floating panes (<code>FloatLayer</code>).</li>
+<li><strong>Missing:</strong> in fullscreen the conversation is covered, so the person can't read or write to the chat. Nothing in the kit pins a tab.</li>
+<li><strong>Open, to settle in the design:</strong>
+<ul>
+<li>Whether the floating chat is the whole conversation or the composer with the latest turns.</li>
+<li>How it reuses the conversation's one editor per chat. A second mounted composer would split drafts. (A pointer from bitloops' study, not verified here.)</li>
+<li>Whether it applies to the automatic fullscreen on narrow screens, where the panel already replaces the chat.</li>
+<li>Whether tab pinning is wanted at all.</li>
+</ul>
+</li>
+<li>bitloops sends its console design so both products follow one pattern. The design here starts when that and the founder's scope are in. It is client UI, so it follows <code>dsh-client-ui-ux</code> and ships with a GIF.</li>
+</ul>
+</li>
 </ul>
 <p><strong>Acceptance (first milestone: the founder's box in Mumbai):</strong></p>
 <ul>
