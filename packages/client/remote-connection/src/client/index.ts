@@ -16,7 +16,7 @@ import { RemoteConnectionSettings } from './RemoteConnectionSettings.tsx'
 import { PairingApproval } from './pairing-approval.ts'
 import { requestsResource } from './pairing-resource.ts'
 import { PairingToast, type PairingInjected } from './PairingRequests.tsx'
-import { en, zh, ja, es, fr, de, ru, pt, type RemoteConnectionLocaleKey } from './locales.ts'
+import { en, ja, es, fr, de, ru, pt, type RemoteConnectionLocaleKey } from './locales.ts'
 
 export type { RemoteConnectionContentProps, RemoteConnectionExtensionProps } from './slots.ts'
 export type { RemoteConnectionState } from './remote-connection-controller.ts'
@@ -39,7 +39,7 @@ export const inject = ['slots', 'locale', 'remote', 'remoteAccess', 'resources']
 export async function apply(ctx: Context): Promise<void> {
   await ctx.remote.$mount(remoteConnectionRemote)
   if ('dshDesktop' in globalThis) return
-  ctx.effect(() => ctx.locale.register('remoteConnection', { en, zh, ja, es, fr, de, ru, pt }), 'remote-connection: dictionaries')
+  ctx.effect(() => ctx.locale.register('remoteConnection', { en, ja, es, fr, de, ru, pt }), 'remote-connection: dictionaries')
   const t = ctx.locale.bind('remoteConnection')
   ctx.inject(['remote.remoteConnection'], (scope) => {
     const controller = new RemoteConnectionController(scope.remote.remoteConnection)

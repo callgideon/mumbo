@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ComposerBlockRegistry } from '../src/client/input/blocks.ts'
 import { InputHub } from '../src/client/input/hub.ts'
 import { ConversationController } from '../src/client/service.ts'
-import { zh } from '../src/client/locales.ts'
+import { en } from '../src/client/locales.ts'
 
 const SESSION = 's1'
 const UNLOAD_MARK = `dsh.composer-draft-attachments-unloaded.${SESSION}`
@@ -56,7 +56,7 @@ async function bench(prepare?: () => void) {
   prepare?.()
   let reference = runtime.sessions.retain(sessionId())
   await reference.ready
-  const hub = new InputHub(runtime.ctx, makeTranslate(zh, {}))
+  const hub = new InputHub(runtime.ctx, makeTranslate(en, {}))
   await runtime.ctx.plugin(ConversationController, {
     input: hub,
     blocks: new ComposerBlockRegistry(),
@@ -221,7 +221,7 @@ describe('page unload report', () => {
     // A reload starts with an empty registry; the saved mark survives in browser storage.
     const second = await bench(() => { localStorage.setItem(UNLOAD_MARK, '1') })
     try {
-      expect(second.shell.notices.getSnapshot()).toMatchObject({ level: 'error', text: zh['attachments.unavailable'] })
+      expect(second.shell.notices.getSnapshot()).toMatchObject({ level: 'error', text: en['attachments.unavailable'] })
       expect(localStorage.getItem(UNLOAD_MARK)).toBeNull()
     } finally {
       await second.runtime.dispose()

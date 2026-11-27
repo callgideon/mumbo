@@ -6,6 +6,7 @@ import ComputerUseRegistry from '@deepseek-ai/dsh-computer-use'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { ComputerUseProviderName } from '@deepseek-ai/dsh-computer-use/types'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as X11Provider from '../src/index.ts'
@@ -125,6 +126,7 @@ beforeEach(async () => {
     spawn,
   } as never)
   await ctx.plugin(ComputerUseRegistry)
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
 })

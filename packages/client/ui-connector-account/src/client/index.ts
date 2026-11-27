@@ -13,7 +13,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import {
   ConnectorAccountActivationEntry, ConnectorAccountBadgeEntry, ConnectorAccountSectionEntry, ConnectorAccountToastEntry,
 } from './components.tsx'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from './locales.ts'
 import { BrowserAccounts } from './state.ts'
 import type { ConnectorAccountFace } from './types.ts'
 
@@ -44,7 +44,7 @@ function registerBundle(ctx: Context, face: ConnectorAccountFace, packageName: s
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'connector-account: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'connector-account: dictionaries')
   const remote = ctx.remote.connectorAccounts
   const browser = new BrowserAccounts(ctx, remote)
   ctx.effect(() => async () => { await browser.dispose() }, 'connector-account: stream')

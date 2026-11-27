@@ -316,7 +316,7 @@ describe('instructions in Run Wild', () => {
     expect(await instructions(ctx, child)).toBe('')
     for (const other of [
       new Error('lookup failed'),
-      new SubagentError('the root lookup failed', 'NOT_FOUND'),
+      new SubagentError('the root lookup failed', 'AGENT_NAME_NOT_FOUND'),
       Object.assign(new Error('not a subagent failure'), { code: 'UNAUTHORIZED' }),
     ]) {
       failure = other

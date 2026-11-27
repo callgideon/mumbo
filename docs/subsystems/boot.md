@@ -361,14 +361,16 @@ Manage profile files and apply their declared reload lifecycle.
  */
 @Remote async updateBundle(name: string, version: string, options?: UpdateBundleOptions): Promise<PluginUpdateResult>
 
-/** Persist a plugin entry's desired enablement and apply it on live profiles.
+/** Persist a plugin entry's desired enablement and apply it on live profiles. Enabling a row on the profile's deny
+ * list fails with an `operation-error` whose diagnostic names the row.
  * @param id Loader entry identity returned by listPlugins.
  * @param enabled Whether the plugin should run.
  * @returns Saved and runtime outcomes, including higher-priority overrides.
  */
 @Remote setPluginEnabled(id: PluginEntryId, enabled: boolean): Promise<ChangeResult>
 
-/** Select or remove a bundle layer while retaining installed dependencies.
+/** Select or remove a bundle layer while retaining installed dependencies. Enabling a bundle on the
+ * profile's deny list fails with an `operation-error` whose diagnostic names the bundle.
  * @param name Bundle package name.
  * @param enabled Whether the bundle contributes its patch layer.
  * @returns Persisted and runtime outcomes.

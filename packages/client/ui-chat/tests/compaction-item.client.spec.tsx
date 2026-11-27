@@ -9,15 +9,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
-import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
+import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { ChatNodeViewProps } from '../src/client/contract/slots.ts'
 import type { CompactionSummaryNode } from '../src/client/contract/snapshot.ts'
 import { CompactionItem } from '../src/client/chat/CompactionItem.tsx'
-import { zh } from '../src/client/locale.ts'
+import { en } from '../src/client/locale.ts'
 
 afterEach(() => { cleanup() })
 
-const t: ChatNodeViewProps['t'] = makeTranslate(zh, commonZh)
+const t: ChatNodeViewProps['t'] = makeTranslate(en, commonEn)
 
 function marker(seq: number): CompactionSummaryNode {
   return { kind: 'compaction', seq, summaryEventSeq: seq - 1, time: 1_000, shadowedItemCount: 2, shadowedTokenCount: 30 }

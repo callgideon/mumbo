@@ -245,7 +245,7 @@ describe('Session MCP Loader composition', () => {
     const own = { uid: process.getuid!(), gid: process.getgid!(), groups, inherit: [], set: { HOME: home, PATH: '/usr/bin:/bin' }, secretNames: ['DEEPSEEK_API_KEY'] }
     const { ctx, root } = await load(false, undefined, 5000, undefined, { name: 'browsermcp', subprocess: { runAs: own, identities: { browsermcp: own } } })
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
-    const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+    const first = await ctx.agents.create({ sessionId: brandString<SessionId>('first'), meta: { cwd: root } })
     await warm(ctx, first.agent)
     expect((await execute(ctx, first.agent)).content).toEqual([{ type: 'text', text: 'Visit 1: direct' }])
     // It starts in the identity's home, never in the Session's directory, where the model could plant what it reads.
@@ -257,7 +257,7 @@ describe('Session MCP Loader composition', () => {
   it('offers the configured MCP roots to each Session\'s server, and none without them', async () => {
     for (const mcpRoots of [['/var/lib/mumbo/uploads'], undefined]) {
       const { ctx, root } = await load(false, undefined, undefined, undefined, undefined, mcpRoots)
-      const first = await ctx.agents.create({ sessionId: SessionId('first'), meta: { cwd: root } })
+      const first = await ctx.agents.create({ sessionId: brandString<SessionId>('first'), meta: { cwd: root } })
       await warm(ctx, first.agent)
       expect((await events(root)).filter(event => event.event === 'initialize').map(event => event.roots)).toEqual([mcpRoots !== undefined])
     }

@@ -38,6 +38,6 @@ it('renders the entry below the pruner threshold', () => {
 })
 
 it('indexes every upstream skill of the pinned release exactly once', () => {
-  const indexed = [...body().matchAll(/^- `([a-z-]+)`：/gmu)].map(match => match[1] ?? '')
+  const indexed = [...body().matchAll(/^- `([a-z-]+)`:/gmu)].map(match => match[1] ?? '')
   expect(indexed.toSorted()).toEqual(UPSTREAM_SKILLS)
 })

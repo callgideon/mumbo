@@ -9,7 +9,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { PairingDecisionResult, PairingRequestId, PairingRequestsValue } from '../src/types.ts'
 import { PairingApproval } from '../src/client/pairing-approval.ts'
 import { PairingRequests, PairingToast } from '../src/client/PairingRequests.tsx'
-import { en, zh, ja, es, fr, de, ru, pt } from '../src/client/locales.ts'
+import { en, ja, es, fr, de, ru, pt } from '../src/client/locales.ts'
 
 afterEach(cleanup)
 
@@ -62,7 +62,7 @@ it('shows the code and source IP, then announces the decision after Settings clo
   } finally { pending.resolve({ ok: true, value: 'unavailable' }); approval.dispose() }
 })
 
-it.each(Object.entries({ en, zh, ja, es, fr, de, ru, pt }))('labels the source IP in %s and renders unknown or the full IPv6 address', (_language, dictionary) => {
+it.each(Object.entries({ en, ja, es, fr, de, ru, pt }))('labels the source IP in %s and renders unknown or the full IPv6 address', (_language, dictionary) => {
   const { props, approval, snapshot, value, useResource } = fixture(null)
   const ipv6 = '2001:0db8:1234:5678:90ab:cdef:1234:5678'
   try {
@@ -140,15 +140,15 @@ it('shows only pairing instructions once an empty list loads', () => {
     expect(screen.getByRole('status', { name: en['pairing.loading'] })).toBeTruthy()
     expect(screen.queryByText(en['pairing.permission'])).toBeNull()
     useResource.mockReturnValue({ ...snapshot, value: { requests: [], pollIntervalMs: 1000 } })
-    view.rerender(<PairingRequests {...props} t={makeTranslate(zh)} />)
-    expect(screen.getByRole('heading', { level: 3, name: zh['pairing.title'] })).toBeTruthy()
-    expect(screen.getByText(zh['pairing.description'])).toBeTruthy()
+    view.rerender(<PairingRequests {...props} t={makeTranslate(fr)} />)
+    expect(screen.getByRole('heading', { level: 3, name: fr['pairing.title'] })).toBeTruthy()
+    expect(screen.getByText(fr['pairing.description'])).toBeTruthy()
     expect(screen.queryByRole('status')).toBeNull()
     expect(screen.queryByRole('note')).toBeNull()
     expect(screen.queryByRole('button')).toBeNull()
     useResource.mockReturnValue({ ...snapshot, status: 'failed', value: { requests: [], pollIntervalMs: 1000 } })
-    view.rerender(<PairingRequests {...props} t={makeTranslate(zh)} />)
-    expect(screen.getByRole('alert').textContent).toBe(zh['pairing.readFailed'])
+    view.rerender(<PairingRequests {...props} t={makeTranslate(fr)} />)
+    expect(screen.getByRole('alert').textContent).toBe(fr['pairing.readFailed'])
     expect(screen.queryByRole('status')).toBeNull()
   } finally { approval.dispose() }
 })

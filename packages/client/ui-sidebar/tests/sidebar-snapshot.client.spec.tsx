@@ -63,7 +63,7 @@ describe('sidebar shell snapshots', () => {
   })
 
   it('renders the New-session content through the unoccupied session-action HOC layer', async () => {
-    const { runtime } = await bench({ locale: 'en' })
+    const { runtime } = await bench()
     const slot = runtime.renderSlot('sidebar', { collapsed: false, width: 300, drawer: false })
     const layer = slot.container.querySelector('[data-slot="sidebar.session.action"]')
     // With no occupant the layer renders the owner's content unchanged, so the

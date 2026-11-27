@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-deepseek-chat-import/remote'
 import type { TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import { ImportSessionsAction } from './ImportSessions.tsx'
 import type { DeepseekChatImportInjected, DeepseekChatImportOutcome } from './ImportSessions.tsx'
-import { de, en, es, fr, ja, NS, pt, ru, zh } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru } from './locales.ts'
 import { uploadArchive } from './upload.ts'
 
 /** Services the browser half reads. */
@@ -19,7 +19,7 @@ export const inject = ['remote', 'slots', 'locale', 'sessions']
  * @param ctx - Context injecting the mounted `deepseekChatImport` Remote namespace.
  */
 function registerUi(ctx: Context): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'deepseek-chat-import: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'deepseek-chat-import: dictionaries')
   const injected: DeepseekChatImportInjected = {
     importArchive: async (file, workspaceId, onProgress, signal): Promise<DeepseekChatImportOutcome> => {
       try {

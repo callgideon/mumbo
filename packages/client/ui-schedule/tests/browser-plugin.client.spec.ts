@@ -468,7 +468,7 @@ describe('ui-schedule browser half', () => {
           expect(startSession).toHaveBeenLastCalledWith(undefined, { prompt, whenDraftExists: 'append' })
         }
       }
-      expect(startSession).toHaveBeenCalledTimes(64)
+      expect(startSession).toHaveBeenCalledTimes(56)
     } finally {
       await fiber.dispose()
       owner()

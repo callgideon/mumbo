@@ -338,7 +338,7 @@ describe('Host Schedule timer', () => {
 
   it('delivers within a minute after wall time jumps past a task while timers stood still', async () => {
     // A paused VM resumes with wall time hours ahead and every pending timer exactly where it was.
-    const tasks = [task(createAfterScheduleRecord(ScheduleId('woke'), 'Woke', 7_200, Date.now(), 'Woke'))]
+    const tasks = [task(createAfterScheduleRecord(brandString<ScheduleId>('woke'), 'Woke', 7_200, Date.now(), 'Woke'))]
     const test = await setup(tasks)
     test.runtime.requestDrive()
     await vi.advanceTimersByTimeAsync(0)

@@ -33,6 +33,7 @@ import {
   type InventoryBaseline,
   type InventoryGate,
 } from './baseline-inventory.ts'
+import { isOwnedSource } from './verify-no-unknown-casts.ts'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -150,13 +151,15 @@ export function findEmptyCatches(file: string, text: string): EmptyCatch[] {
 }
 
 /**
- * Scan tracked source and non-ignored new source, including tests and configuration files.
+ * Scan tracked source and non-ignored new source, including tests and configuration files. The pinned
+ * `packages/mumbo/superagent` copy is skipped except `src/mumbo/`.
  * @param repoRoot - repository root containing the Git index.
  * @returns every empty clause that breaks the rule in the current working tree.
  * @throws if discovery omits a required source area, finds no catch clause at all, or an eligible path is a symlink.
  */
 export function scanEmptyCatches(repoRoot: string): EmptyCatch[] {
   const scans = listInventorySources(repoRoot, 'verify-empty-catch')
+    .filter(isOwnedSource)
     .map(file => analyze(file, readFileSync(resolve(repoRoot, file), 'utf8')))
   if (scans.every(scan => scan.clauses === 0)) {
     throw new Error('verify-empty-catch: source discovery found no catch clause')

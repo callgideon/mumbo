@@ -34,7 +34,7 @@ describe('cua-mcp bundle', () => {
     expect(manifest.exports).toHaveProperty('./locale/*.json')
     expect(manifest.dsh.bundle).toEqual({ patch: './cordis.patch.yml' })
     expect(Object.keys(manifest.optionalDependencies)).toEqual(['@deepseek-ai/dsh-cua-macos', '@deepseek-ai/dsh-cua-windows'])
-    expect(readdirSync(resolve(root, 'locale')).sort()).toEqual(['de.json', 'en.json', 'es.json', 'fr.json', 'ja.json', 'pt.json', 'ru.json', 'zh.json'])
+    expect(readdirSync(resolve(root, 'locale')).sort()).toEqual(['de.json', 'en.json', 'es.json', 'fr.json', 'ja.json', 'pt.json', 'ru.json'])
   })
 
   it('composes the standalone profile from one insert without model adapters, prompt tools, or telemetry', () => {

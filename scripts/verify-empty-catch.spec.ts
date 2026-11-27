@@ -257,6 +257,16 @@ describe('empty catch source discovery', () => {
     expect(() => verifyEmptyCatch(root)).toThrow(`source discovery omitted ${area}/`)
   })
 
+  it('checks src/mumbo/ of the pinned superagent copy and skips the rest of the copy', () => {
+    const root = fixture()
+    for (const file of ['src/mumbo/input.ts', 'src/app/input.ts', 'src/input.ts', 'tests/input.ts']) {
+      write(root, `packages/mumbo/superagent/${file}`, broken)
+    }
+    git(root, 'add', '.')
+    expect(scanEmptyCatches(root).map(finding => finding.file)).toEqual(['packages/mumbo/superagent/src/mumbo/input.ts'])
+    expect(() => verifyEmptyCatch(root)).toThrow('packages/mumbo/superagent/src/mumbo/input.ts:1')
+  })
+
   it('rejects a corpus without any catch clause', () => {
     const root = fixture()
     for (const area of ['packages', 'apps', 'scripts', 'website']) write(root, `${area}/seed.ts`, 'export {}\n')

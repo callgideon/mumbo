@@ -1217,7 +1217,7 @@ describe('registry-global session archive', () => {
     })
     result.ctx.on('workspace/session-stop', ({ sessionId }) => { order.push(`stop:${sessionId}`) })
 
-    await expect(result.registry.archiveSession(SessionId('kept'), options)).rejects.toMatchObject({
+    await expect(result.registry.archiveSession(brandString<SessionId>('kept'), options)).rejects.toMatchObject({
       name: 'WorkspaceArchiveVetoedError',
       sessionId: 'kept',
       reason: 'it is the assistant',
@@ -1229,11 +1229,11 @@ describe('registry-global session archive', () => {
     expect(result.changes.filter(change => change.table === '')).toEqual([])
 
     // A listener returning undefined leaves the archive to the other checks.
-    await result.registry.archiveSession(SessionId('other'), options)
+    await result.registry.archiveSession(brandString<SessionId>('other'), options)
     expect(result.registry.archivedSessionIds).toEqual(['other'])
     // The veto is asked before the unknown-session check, too.
     order.length = 0
-    await expect(result.registry.archiveSession(SessionId('ghost'), options))
+    await expect(result.registry.archiveSession(brandString<SessionId>('ghost'), options))
       .rejects.toThrow(/cannot archive session 'ghost'/)
     expect(order).toEqual(['veto:ghost'])
   })
@@ -1241,17 +1241,17 @@ describe('registry-global session archive', () => {
   it('refuses an already archived vetoed session and archives once the veto is disposed', async () => {
     const dir = await makeDir('archive-veto-dispose')
     const result = await harness({ sessions: [header('kept', dir, 100)] })
-    await result.registry.archiveSession(SessionId('kept'))
+    await result.registry.archiveSession(brandString<SessionId>('kept'))
     const dispose = result.ctx.on('workspace/archive-veto', () => 'kept')
-    await expect(result.registry.archiveSession(SessionId('kept')))
+    await expect(result.registry.archiveSession(brandString<SessionId>('kept')))
       .rejects.toThrow("cannot archive session 'kept': kept")
-    await result.registry.unarchiveSession(SessionId('kept'))
-    await expect(result.registry.archiveSession(SessionId('kept'), { stopActivity: true }))
+    await result.registry.unarchiveSession(brandString<SessionId>('kept'))
+    await expect(result.registry.archiveSession(brandString<SessionId>('kept'), { stopActivity: true }))
       .rejects.toThrow("cannot archive session 'kept': kept")
     expect(result.registry.archivedSessionIds).toEqual([])
 
     dispose()
-    await result.registry.archiveSession(SessionId('kept'), { stopActivity: true })
+    await result.registry.archiveSession(brandString<SessionId>('kept'), { stopActivity: true })
     expect(result.registry.archivedSessionIds).toEqual(['kept'])
   })
 

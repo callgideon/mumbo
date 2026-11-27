@@ -8,7 +8,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type {} from '@deepseek-ai/dsh-client-ui-action-cards/client'
 import type {} from '@deepseek-ai/dsh-plugin-recommendations/remote'
 import { PluginCardBody, type CatalogDetails, type PluginCardServices } from './Card.tsx'
-import { de, en, es, fr, ja, pt, ru, zh, type RecommendationKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, type RecommendationKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap { pluginRecommendations: RecommendationKey }
@@ -23,7 +23,7 @@ export const inject = ['locale', 'remote', 'remote.pluginRecommendations', 'acti
 export function apply(ctx: Context): void {
   // Catalog text by plugin name for this plugin lifetime: a revisited card renders it before its own lookup returns.
   const catalog = createSnapshotStore<Readonly<Record<string, CatalogDetails>>>({})
-  ctx.effect(() => ctx.locale.register('pluginRecommendations', { en, zh, ja, es, fr, de, ru, pt }), 'plugin-recommendations: locale')
+  ctx.effect(() => ctx.locale.register('pluginRecommendations', { en, ja, es, fr, de, ru, pt }), 'plugin-recommendations: locale')
   // The Plugins page provides its navigation only while the current Peer may use it; without a body the shared frame offers Not now alone.
   ctx.inject(['pluginNavigation'], (scope: Context) => {
     const services: PluginCardServices = {

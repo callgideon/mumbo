@@ -336,7 +336,7 @@ describe('workspace-changes with summaries off', () => {
     const cwd = await repository()
     const { ctx } = await boot({ summaries: false })
     const spawn = vi.spyOn(ctx.subprocess, 'spawn')
-    const session = ctx.sessions.create(SessionId('off'), { meta: { cwd } })
+    const session = ctx.sessions.create(brandString<SessionId>('off'), { meta: { cwd } })
     startTurn(session, 1)
     await settle(ctx, session)
     await mutate(ctx, session, 1, 'write', { file_path: 'new.txt', content: 'n\n' }, 'new.txt', () => writeFile(join(cwd, 'new.txt'), 'n\n'))

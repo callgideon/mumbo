@@ -630,7 +630,7 @@ describe('WorkspaceController after a restore', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
     expect(ctx.get('workspaceRegistry')).toBeUndefined()
     expect(ctx.get('workspaceController')).toBeUndefined()
-    const owner = new Peer(ctx.root, { principal: { kind: 'owner' } })
+    const owner = new Peer(ctx, { principal: { kind: 'owner' } })
     await expect(ctx.typertGateway.invoke({
       peer: owner, namespace: 'workspace', method: 'rename', args: { request: { workspaceId: 'restored', title: 'early' } },
     })).rejects.toMatchObject({ code: 'gateway/invocation-unavailable' })

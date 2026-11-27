@@ -8,6 +8,8 @@ The [native stack decision](2026-08-02-native-github-stacks-and-optional-rebases
 
 ## Decision
 
+This fork does not apply this decision. Its branches follow the root [AGENTS.md](../../../../AGENTS.md) and the [native stack decision](2026-08-02-native-github-stacks-and-optional-rebases.md): merge-forward and rebase stay equally allowed for PR branches, upstream syncs land as merge commits, and shared branches are never rebased or force-pushed. The remaining text records upstream's decision.
+
 Agents refresh standalone and stacked PR branches by rebase, including after review. Before rebasing, the agent enables, once per clone, Git's reuse of recorded resolutions with `git config rerere.enabled true`, so Git records each resolved conflict and applies the recorded resolution when the same conflict recurs in a later rebase. The agent leaves `rerere.autoUpdate` unset, so Git leaves a replayed resolution unstaged for inspection; the agent reviews and stages it before continuing the rebase.
 
 Merge-forward is used only when the PR author explicitly asks for it. The incremental merge-forward procedure and its rule to preserve an in-progress checkpoint before taking a newer base remain available for that case.

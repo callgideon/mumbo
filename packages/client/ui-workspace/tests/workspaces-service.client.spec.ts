@@ -365,7 +365,7 @@ describe('UiWorkspaceService', () => {
     b.workspaces.list.set(workspaceState([workspace('restored')]))
     b.sessions.list.set(sessionState())
     await vi.waitFor(() => {
-      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-restored'), { source: 'mainView' })
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-restored'), { source: 'mainView', facets: { conversation: true } })
     })
     expect(b.workspaces.initializeDefault).not.toHaveBeenCalled()
     expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('restored') })
@@ -858,7 +858,7 @@ describe('UiWorkspaceService', () => {
       sessions: sessionState([summary('mumbo', { blank: true, cwd: '/w/a', title: 'Mumbo' })]),
       workspaces: workspaceState([workspace('a', [sid('mumbo')])]),
     })
-    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('mumbo'), { source: 'mainView' })
+    expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('mumbo'), { source: 'mainView', facets: { conversation: true } })
     expect(b.sessions.create).not.toHaveBeenCalled()
   })
 

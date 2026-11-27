@@ -31,6 +31,8 @@ import type {
   SidebarPanelActionsOwnerProps, SidebarPanelMetadata, SidebarRootComponentProps, SidebarRootInjected, SidebarSectionHookContext,
   SidebarSectionOwnerProps,
 } from './contract/slots.ts'
+// Type-only: pulls the useSessionStatus root standard-hook merge.
+import type {} from '@deepseek-ai/dsh-client-ui-session-status/client'
 import type { SidebarKey } from './locales.ts'
 import { FIXED_PANEL_ID } from './panel-pins.ts'
 import { createScrollHandoff } from './scroll-handoff.ts'

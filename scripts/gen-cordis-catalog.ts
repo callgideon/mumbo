@@ -328,6 +328,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   RemoteLoginTicket: 'web-server.md',
   RemoteLoginState: 'web-server.md',
   AuthenticationProvider: '../../packages/client/connection/README.md#browser-authentication-and-request-trust',
+  AuthenticationRegistrationOptions: '../../packages/client/connection/README.md#browser-authentication-and-request-trust',
   PeerId: 'typert.md',
   Principal: 'typert.md',
   PrincipalMap: 'typert.md',

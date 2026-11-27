@@ -1,22 +1,16 @@
 /** The bundle's patch, read with the entry-list dialect DSH reads bundle patches with, and the agent preset it defines. */
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { applyEntryPatches, entryListSchema } from '@deepseek-ai/cordis-plugin-include'
+import { applyEntryPatches, parseEntryYaml, type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import { ROUTER_PRESET, WORKER_PRESET } from '../src/app/sessions.ts'
 
 interface Row { id?: string; name: string; disabled?: unknown; config?: Record<string, unknown> & { plugins?: Row[] } | Row[] }
-/**
- * The patch as DSH reads it: Cordis's include plugin, from source, parses `!!js` scalars with its own js-yaml and applies
- * the inserts to an entry list.
- */
-async function patched(): Promise<Row[]> {
-  const includeRoot = join(import.meta.dirname, '..', '..', '..', '..', 'vendor', 'include', 'package.json')
-  const yaml = await import(createRequire(includeRoot).resolve('js-yaml')) as { load(text: string, options: { schema: unknown }): unknown }
-  const patches = yaml.load(readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8'), { schema: entryListSchema }) as unknown[]
+/** The patch as DSH reads it: Cordis's include plugin parses it, `!!js` scalars included, and applies the inserts to an entry list. */
+function patched(): Row[] {
+  const patches = parseEntryYaml(readFileSync(join(import.meta.dirname, '..', 'cordis.patch.yml'), 'utf8')) as PatchOptions[]
   const warnings: string[] = []
-  const rows = applyEntryPatches([], patches as never, message => { warnings.push(message) }) as Row[]
+  const rows = applyEntryPatches([], patches, (message) => { warnings.push(message) }).data as Row[]
   expect(warnings).toEqual([])
   return rows
 }
@@ -27,8 +21,8 @@ const flat = (rows: readonly Row[]): Row[] => rows.flatMap(row => [row, ...Array
 const presetOf = (rows: readonly Row[], id: string) => rows.map(row => row.config as { id?: string; order?: number; plugins: Row[] })
   .find(config => config?.id === id)!
 
-it('defines the worker preset Executor Sessions run under, with a shell that moves long commands to the background', async () => {
-  const rows = await patched()
+it('defines the worker preset Executor Sessions run under, with a shell that moves long commands to the background', () => {
+  const rows = patched()
   expect(rows.map(row => row.id)).toEqual(['dsh-superagent', 'dsh-superagent-github', 'dsh-superagent-feishu', 'dsh-superagent-worker-preset',
     'dsh-superagent-router-preset'])
   const preset = presetOf(rows, WORKER_PRESET)
@@ -52,8 +46,8 @@ it('defines the worker preset Executor Sessions run under, with a shell that mov
     '@deepseek-ai/dsh-tool-workflow', '@deepseek-ai/dsh-workflow-ptc']) expect(names).not.toContain(name)
 })
 
-it('defines the router preset the main Session runs under: the worker\'s 5-second shell and job waits, and only the tools it uses', async () => {
-  const rows = await patched()
+it('defines the router preset the main Session runs under: the worker\'s 5-second shell and job waits, and only the tools it uses', () => {
+  const rows = patched()
   const router = presetOf(rows, ROUTER_PRESET), worker = presetOf(rows, WORKER_PRESET)
   expect(router.order).toBe(91)
   const plugins = flat(router.plugins)

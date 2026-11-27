@@ -332,7 +332,7 @@ describe('JobsSection rows', () => {
       job({ id: 'bash-5' as JobView['id'], label: 'e', status: 'failed', finishedAt: 1_700_000_000_000 }),
     ])} />)
     fireEvent.click(screen.getByRole('button', { name: en['section.settledCount'].replace('{count}', '3') }))
-    for (const word of ['done', 'cancelled', 'failed']) {
+    for (const word of ['completed', 'cancelled', 'failed']) {
       expect(within(screen.getByRole('list')).getByText(`bash · ${word}`)).toBeDefined()
     }
     expect([...screen.getByRole('list').querySelectorAll('li [data-state]')].map(node => node.getAttribute('data-state')))

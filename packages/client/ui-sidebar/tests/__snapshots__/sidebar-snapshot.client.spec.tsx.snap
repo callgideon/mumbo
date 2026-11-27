@@ -283,6 +283,7 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
   >
     <button
       aria-current="page"
+      aria-describedby=":rd:"
       aria-label="Mumbo"
       class="panelRow"
       type="button"
@@ -309,12 +310,22 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
       >
         Mumbo
       </span>
+      <span
+        class="panelTrailing"
+        id=":rd:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
+      </span>
     </button>
   </div>
   <div
     class="panelEntry panelEntryWide"
   >
     <button
+      aria-describedby=":rg:"
       aria-label="Plugins"
       class="panelRow"
       type="button"
@@ -340,6 +351,15 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
         class="panelTitle wide"
       >
         Plugins
+      </span>
+      <span
+        class="panelTrailing"
+        id=":rg:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
       </span>
     </button>
   </div>
@@ -356,6 +376,7 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
   >
     <button
       aria-current="page"
+      aria-describedby=":rd:"
       aria-label="Mumbo"
       class="panelRow"
       type="button"
@@ -382,12 +403,22 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
       >
         Mumbo
       </span>
+      <span
+        class="panelTrailing"
+        id=":rd:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
+      </span>
     </button>
   </div>
   <div
     class="panelEntry panelEntryWide"
   >
     <button
+      aria-describedby=":rg:"
       aria-label="Plugins"
       class="panelRow"
       type="button"
@@ -414,6 +445,15 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
       >
         Plugins
       </span>
+      <span
+        class="panelTrailing"
+        id=":rg:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
+      </span>
     </button>
   </div>
 </nav>
@@ -429,6 +469,7 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
   >
     <button
       aria-current="page"
+      aria-describedby=":rd:"
       aria-label="Mumbo"
       class="panelRow"
       type="button"
@@ -450,12 +491,22 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
           />
         </div>
       </span>
+      <span
+        class="panelTrailing"
+        id=":rd:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
+      </span>
     </button>
   </div>
   <div
     class="panelEntry"
   >
     <button
+      aria-describedby=":rg:"
       aria-label="Plugins"
       class="panelRow"
       type="button"
@@ -476,6 +527,15 @@ exports[`sidebar shell snapshots > renders a Session row above Plugins, selected
             width="18"
           />
         </div>
+      </span>
+      <span
+        class="panelTrailing"
+        id=":rg:"
+      >
+        <span
+          data-slot="sidebar.panellist.trailing"
+          style="display: contents;"
+        />
       </span>
     </button>
   </div>

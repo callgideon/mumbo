@@ -37,6 +37,6 @@ it('renders the entry below the pruner threshold', () => {
 })
 
 it('indexes every guide of the pinned commit exactly once', () => {
-  const indexed = [...body().matchAll(/^- `(wecomcli-[a-z-]+)`：/gmu)].map(match => match[1] ?? '')
+  const indexed = [...body().matchAll(/^- `(wecomcli-[a-z-]+)`:/gmu)].map(match => match[1] ?? '')
   expect(indexed.toSorted()).toEqual(PINNED_GUIDES.toSorted())
 })

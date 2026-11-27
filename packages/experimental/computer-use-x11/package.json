@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-computer-use-x11",
   "description": "Experimental Linux X11 computer use through xdotool and ImageMagick import",
-  "version": "0.2.2-rc.2",
+  "version": "0.2.3-alpha.2",
   "publishConfig": {
     "access": "public"
   },

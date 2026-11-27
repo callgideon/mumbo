@@ -648,7 +648,7 @@ describe('ModelSelect keyboard walk', () => {
   })
 
   it('keeps focus and the card open when non-focusable model pane content is pressed', () => {
-    render(<ModelSelect renderSlot={renderLabel} locked={false} available
+    render(<ModelSelect useAccess={allow} renderSlot={renderLabel} locked={false} available
       directory={createSnapshotStore(state({ groups: modelGroups(5) }))}
       load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t}
     />)

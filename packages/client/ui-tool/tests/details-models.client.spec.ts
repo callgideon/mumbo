@@ -66,7 +66,7 @@ describe('control detail adapters', () => {
         fields: [{ label: 'Message ID', value: 'message-accepted' }],
       }],
     })
-    const translate = makeTranslate(zh, commonZh)
+    const translate = makeTranslate(en, commonEn)
     expect(detailsCardModel(output('session_send_message', text, args), translate, 'zh-CN')?.items[0]?.badge?.label)
       .toBe(translate('detail.status.accepted'))
     for (const malformed of ['null', '[]', '{}', '{"message_id":1}', '{"message_id":" "}']) {

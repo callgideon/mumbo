@@ -2,7 +2,7 @@
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 /** Global panel rows and DOM focus through the production slot renderer. */
 import type { Context } from '@deepseek-ai/cordis'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { act, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { SlotTestRuntime } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
@@ -624,6 +624,9 @@ describe('sidebar Session rows', () => {
   })
 
   it.each([false, true])('shows its Session\'s pending answer, then activity, then an unseen completion as a status dot, with collapsed=%s', async (collapsed) => {
+    // A focused page: the status table hides a completion while its Session is the visible main view.
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    onTestFinished(() => { focus.mockRestore() })
     const { runtime, mumbo, openSession } = await sessionBench(collapsed)
     expect(statusOf(mumbo)).toBeNull()
     expect(mumbo.querySelector('[data-state]')).toBeNull()
@@ -641,9 +644,15 @@ describe('sidebar Session rows', () => {
     act(() => { answered() })
     await waitFor(() => { expect(statusOf(mumbo)).toBe('Running') })
 
-    // A turn that ends while another Session is open stays marked until Mumbo is opened.
+    // A turn that ends while another Session is open stays marked until Mumbo is opened. The Host's reading record
+    // carries the completion.
     act(() => { openSession(SIDE) })
     await runtime.sessions.updateSummary(MUMBO, { running: false })
+    act(() => {
+      runtime.ctx.uiSession.sessionStatus.reading.accept({
+        sessionId: MUMBO, completedTurn: 1, failed: false, readTurn: 0, manualUnread: false,
+      })
+    })
     await waitFor(() => { expect(statusOf(mumbo)).toBe('Completed') })
     expect(mumbo.querySelector('[data-state]')?.getAttribute('data-state')).toBe('done')
     fireEvent.click(mumbo)

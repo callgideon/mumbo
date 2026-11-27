@@ -63,8 +63,10 @@ export function findUnknownCasts(file: string, text: string): UnknownCast[] {
 /**
  * `packages/mumbo/superagent` is a pinned upstream copy, except Mumbo's own modules in `src/mumbo/`; see
  * packages/mumbo/superagent/UPSTREAM.md S11.
+ * @param file - repository-relative source path with forward slashes.
+ * @returns `false` for a file of the pinned copy outside `src/mumbo/`.
  */
-function isOwnedSource(file: string): boolean {
+export function isOwnedSource(file: string): boolean {
   return !file.startsWith('packages/mumbo/superagent/') || file.startsWith('packages/mumbo/superagent/src/mumbo/')
 }
 

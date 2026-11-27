@@ -97,8 +97,13 @@ async function page(options: PageOptions) {
   const view = createWorkspaceViewStore().create()
   // The owner's page: every access answer allows.
   new StaticRemoteAccess(ctx)
+  // No Session has a status: recent-view retention keeps nothing besides the main-view Session.
+  ctx.provide('uiSession', { sessionStatus: createSnapshotStore(new Map()) } as never)
   // The service provides `uiWorkspace` on the root, as ui-workspace's apply does.
-  const service = new UiWorkspaceService(ctx, {} as never, workspacesService as never, sessions as never, view.actions, vi.fn())
+  const service = new UiWorkspaceService(
+    ctx, {} as never, workspacesService as never, sessions as never, view.actions, vi.fn(),
+    createSnapshotStore<number | undefined>(undefined),
+  )
   const plugin = options.plugin === false ? undefined : await ctx.plugin({ inject, apply })
   const ready = () => {
     workspaces.set({

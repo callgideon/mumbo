@@ -110,7 +110,7 @@ describe('ui-jobs browser half', () => {
     expect(sectionEntryIds(ctx)).toContain('background-jobs')
     const entry = ctx.slots.entries('conversation.session.panel.section').find(candidate => candidate.options.id === 'background-jobs')
     expect(entry?.options.order).toBe(300)
-    expect(resolveSlotLabel(entry?.options.label)).toBe(zh['list.aria'])
+    expect(resolveSlotLabel(entry?.options.label)).toBe(fr['list.aria'])
     const dot = ctx.slots.entries('conversation.session.panel.indicator')[0]
     expect(dot).toMatchObject({ options: { id: 'background-jobs.running', order: 20 } })
     const face = dot?.inject as (() => JobsRunningIndicatorInjected) | undefined

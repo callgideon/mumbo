@@ -65,7 +65,7 @@ function authenticationPage(options: AuthenticationPageOptions = { tokenLoginEna
 it.each(['en-US', 'zh-CN'])('shows the anonymous Token form without Client boot data in %s', (language) => {
   const fixture = authenticationPage(undefined, language)
   enterAuthenticationPage(loginLocales)
-  const t = language.startsWith('zh') ? loginLocales.zh : loginLocales.en
+  const t = loginLocales.en
   expect(document.title).toBe(t.authenticationTitle)
   expect(document.getElementById('description')?.textContent).toBe(t.authenticationDescription)
   const title = document.getElementById('token-title')!
@@ -116,7 +116,7 @@ it.each([
 it('hides the Token form when its provider is unavailable', () => {
   const fixture = authenticationPage({ tokenLoginEnabled: false }, 'zh-CN')
   enterAuthenticationPage(loginLocales)
-  expect(document.getElementById('description')?.textContent).toBe(loginLocales.zh.authenticationUnavailable)
+  expect(document.getElementById('description')?.textContent).toBe(loginLocales.en.authenticationUnavailable)
   expect(document.getElementById('token-form')).toBeNull()
   expect(fixture.exchange).not.toHaveBeenCalled()
 })
@@ -132,10 +132,10 @@ it('clears a Token from the address and clears submission feedback on edit', asy
   expect(fixture.input.hasAttribute('aria-invalid')).toBe(false)
   fixture.input.value = TOKEN
   fixture.form.dispatchEvent(new Event('submit', { cancelable: true }))
-  await expect.poll(() => fixture.error.textContent).toBe(loginLocales.zh.tokenInvalid)
+  await expect.poll(() => fixture.error.textContent).toBe(loginLocales.en.tokenInvalid)
   await expect.poll(() => fixture.submit.disabled).toBe(false)
   expect(fixture.input.getAttribute('aria-invalid')).toBe('true')
-  expect(fixture.input.previousElementSibling?.textContent).toBe(loginLocales.zh.tokenHint)
+  expect(fixture.input.previousElementSibling?.textContent).toBe(loginLocales.en.tokenHint)
   expect(fixture.input.nextElementSibling).toBe(fixture.error)
   fixture.input.dispatchEvent(new Event('input'))
   expect(fixture.error.textContent).toBe('')
@@ -181,7 +181,7 @@ it.each([401, 403, 503])('keeps HTTP %i on the anonymous page and allows another
   enterAuthenticationPage(loginLocales)
   fixture.input.value = TOKEN
   fixture.form.dispatchEvent(new Event('submit', { cancelable: true }))
-  await expect.poll(() => fixture.error.textContent).toBe(status === 401 ? loginLocales.zh.tokenInvalid : loginLocales.zh.tokenFailed)
+  await expect.poll(() => fixture.error.textContent).toBe(status === 401 ? loginLocales.en.tokenInvalid : loginLocales.en.tokenFailed)
   await expect.poll(() => fixture.submit.disabled).toBe(false)
   expect(fixture.input.getAttribute('aria-invalid')).toBe(status === 401 ? 'true' : null)
   expect(fixture.replace).not.toHaveBeenCalled()
@@ -265,11 +265,11 @@ it('clears the credential before POST and keeps the mount prefix when opening th
     return pending.promise
   })
   enterAuthenticationPage(loginLocales)
-  expect(document.documentElement.lang).toBe('zh')
-  expect(document.title).toBe(loginLocales.zh.authenticationTitle)
-  expect(document.getElementById('title')?.textContent).toBe(loginLocales.zh.authenticationTitle)
-  expect(document.getElementById('open')?.textContent).toBe(loginLocales.zh.open)
-  expect(fixture.status.textContent).toBe(loginLocales.zh.pending)
+  expect(document.documentElement.lang).toBe('en')
+  expect(document.title).toBe(loginLocales.en.authenticationTitle)
+  expect(document.getElementById('title')?.textContent).toBe(loginLocales.en.authenticationTitle)
+  expect(document.getElementById('open')?.textContent).toBe(loginLocales.en.open)
+  expect(fixture.status.textContent).toBe(loginLocales.en.pending)
   expect(fixture.replace).not.toHaveBeenCalled()
   pending.resolve(new Response(null, { status: 204 }))
   await expect.poll(() => fixture.replace.mock.calls).toEqual([['./']])
@@ -352,24 +352,24 @@ it('keeps QR errors visible while Token sign-in remains available and handles it
   const fixture = page(undefined, 'zh-CN')
   fixture.exchange.mockResolvedValueOnce(new Response(null, { status: 410 }))
   enterAuthenticationPage(loginLocales)
-  await expect.poll(() => fixture.status.textContent).toBe(loginLocales.zh.invalid)
+  await expect.poll(() => fixture.status.textContent).toBe(loginLocales.en.invalid)
   expect(fixture.form.hidden).toBe(false)
   expect(fixture.submit.disabled).toBe(false)
   fixture.exchange.mockResolvedValueOnce(new Response(null, { status: 401 }))
   fixture.input.value = TOKEN
   fixture.form.dispatchEvent(new Event('submit', { cancelable: true }))
-  await expect.poll(() => fixture.error.textContent).toBe(loginLocales.zh.tokenInvalid)
+  await expect.poll(() => fixture.error.textContent).toBe(loginLocales.en.tokenInvalid)
   await expect.poll(() => fixture.submit.disabled).toBe(false)
-  expect(fixture.status.textContent).toBe(loginLocales.zh.invalid)
+  expect(fixture.status.textContent).toBe(loginLocales.en.invalid)
   expect(fixture.status.getAttribute('role')).toBe('alert')
   fixture.exchange.mockResolvedValueOnce(new Response(null, { status: 200 }))
   fixture.input.dispatchEvent(new Event('input'))
   expect(fixture.error.textContent).toBe('')
-  expect(fixture.status.textContent).toBe(loginLocales.zh.invalid)
+  expect(fixture.status.textContent).toBe(loginLocales.en.invalid)
   fixture.form.dispatchEvent(new Event('submit', { cancelable: true }))
   await expect.poll(() => fixture.replace.mock.calls).toEqual([['./']])
   expect(fixture.exchange.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'GET', 'GET'])
-  expect(fixture.status.textContent).toBe(loginLocales.zh.invalid)
+  expect(fixture.status.textContent).toBe(loginLocales.en.invalid)
 })
 
 it('automatically exchanges a fragment at the ordinary root without a QR query parameter', async () => {
@@ -400,7 +400,7 @@ it('escapes embedded localized text before serializing the anonymous script', ()
 it.each(['en-US', 'zh-CN'])('keeps device pairing available without the Token provider in %s', (language) => {
   const fixture = authenticationPage({ tokenLoginEnabled: false, pairingEnabled: true }, language)
   enterAuthenticationPage(loginLocales)
-  const t = language.startsWith('zh') ? loginLocales.zh : loginLocales.en
+  const t = loginLocales.en
   expect(document.getElementById('description')?.textContent).toBe(t.authenticationDescription)
   expect(document.getElementById('token-form')).toBeNull()
   expect(document.querySelectorAll('dsh-device-pairing')).toHaveLength(1)

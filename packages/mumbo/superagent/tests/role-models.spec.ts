@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { AgentModel, modelSelectionProjectionDefinition, type Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
@@ -8,7 +9,7 @@ import { initializeRoleModel } from '../src/app/role-models.ts'
 const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())); vi.restoreAllMocks() })
 async function fixture() {
-  const ctx = new Context(); contexts.push(ctx); await ctx.plugin(SystemPrompt)
+  const ctx = new Context(); contexts.push(ctx); await ctx.plugin(SessionProjectionRegistry); await ctx.plugin(SystemPrompt)
   const resolve = vi.fn(async value => value)
   const flush = vi.fn(async () => {})
   ctx.reflect.provide('llm', { resolveCallConfig: resolve })

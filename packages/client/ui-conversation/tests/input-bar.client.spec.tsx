@@ -479,11 +479,11 @@ describe('composer placeholder visibility', () => {
     second.view.rerender(<InputBar {...second.props} sessionId={'s2' as SessionId} />)
 
     expect(first.view.getByRole('textbox', { name: 'Review @ files' })).toBe(first.textarea)
-    expect(second.view.getByRole('textbox', { name: zh['placeholder.plan'] })).toBe(second.textarea)
+    expect(second.view.getByRole('textbox', { name: en['placeholder.plan'] })).toBe(second.textarea)
     expect(first.view.container.querySelector('[data-composer-placeholder] kbd')?.textContent).toBe('@')
     writeDraft(first.shell, 'My draft')
     expect(first.view.container.querySelector('[data-composer-placeholder]')).toBeNull()
-    expect(within(first.view.container).getByRole('textbox', { name: zh['placeholder.plan'] })).toBe(first.textarea)
+    expect(within(first.view.container).getByRole('textbox', { name: en['placeholder.plan'] })).toBe(first.textarea)
     writeDraft(first.shell, '')
     expect(first.view.getByRole('textbox', { name: 'Review @ files' })).toBe(first.textarea)
   })
@@ -502,16 +502,16 @@ describe('composer placeholder visibility', () => {
   it.each([
     {
       state: 'Workspace picker',
-      options: { inert: true, onRequestWorkspace: () => {}, placeholder: zh['placeholder.workspace'] },
-      text: zh['placeholder.workspace'], name: zh['hero.chooseWorkspace'],
+      options: { inert: true, onRequestWorkspace: () => {}, placeholder: en['placeholder.workspace'] },
+      text: en['placeholder.workspace'], name: en['hero.chooseWorkspace'],
     },
     {
       state: 'composer block',
       options: { blocked: { reason: 'Select a model' }, placeholder: 'Select a model' },
       text: 'Select a model',
     },
-    { state: 'unavailable Session', options: { disabled: true }, text: zh['placeholder.unavailable'] },
-    { state: 'queued messages', options: { running: true, queue: [row('pending')] }, text: zh['placeholder.steerQueue'] },
+    { state: 'unavailable Session', options: { disabled: true }, text: en['placeholder.unavailable'] },
+    { state: 'queued messages', options: { running: true, queue: [row('pending')] }, text: en['placeholder.steerQueue'] },
   ])('keeps the $state guidance when a plugin supplies a hint', ({ options, text, name }) => {
     const { view, textarea } = bench({ ...options, renderSlotChain: reviewHint })
     expect(view.container.querySelector('[data-composer-placeholder]')?.textContent).toBe(text)

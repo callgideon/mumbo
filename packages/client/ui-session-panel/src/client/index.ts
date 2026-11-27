@@ -22,7 +22,7 @@ import { SessionPanelToggle } from './SessionPanelToggle.tsx'
 import { ENVIRONMENT_SECTION_ID, sectionSource } from './sections.ts'
 import type { ProjectRowInjected, SessionPanelInjected, SessionPanelToggleInjected } from './slots.ts'
 import { SessionPanelState } from './visibility.ts'
-import { de, en, es, fr, ja, NS, pt, ru, zh, type SessionPanelKey } from './locales.ts'
+import { de, en, es, fr, ja, NS, pt, ru, type SessionPanelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -47,7 +47,7 @@ export const inject = ['slots', 'locale', 'remote']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-session-panel: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { en, ja, es, fr, de, ru, pt }), 'ui-session-panel: dictionaries')
   const t = ctx.locale.bind(NS)
   const state = new SessionPanelState()
   ctx.effect(() => () => { state.dispose() }, 'ui-session-panel: overlay follower and dock probes')

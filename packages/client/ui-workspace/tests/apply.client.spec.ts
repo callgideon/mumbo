@@ -757,7 +757,7 @@ describe('ui-workspace apply', () => {
     const b = await bench()
     onTestFinished(() => b.ctx.fiber.dispose())
     declare(b.slots, 'sidebar.workspaces', 'shell.overlay')
-    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    await b.ctx.plugin({ inject: [...inject], apply }, syncedConfig({ recentViewLimit: 10 })).await()
     b.fork.mockRejectedValueOnce(new SessionForkError(
       new RemoteError('session/fork-unavailable', 'no completed turn', { sessionId: sid('mumbo') }),
       sid('mumbo'),

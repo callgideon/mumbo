@@ -33,7 +33,7 @@ function setup(autoFocus = true, extraOption?: ReactNode) {
     }
     return options?.fallback ?? null
   }
-  render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} select={select}
+  render(<ModelSelect useAccess={() => true} locked={false} available directory={directory} load={vi.fn()} select={select}
     resolveText={text => typeof text === 'string' ? text : text.en} t={makeTranslate(en)} renderSlot={renderSlot} />)
   const trigger = screen.getByRole('button', { name: /^Select model/ })
   fireEvent.click(trigger)

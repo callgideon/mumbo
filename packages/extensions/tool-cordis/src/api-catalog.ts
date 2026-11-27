@@ -838,9 +838,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Credential verifier registry whose registrations belong to the calling plugin.',
     methods: [
       {
-        signature: 'register(provider: AuthenticationProvider): () => Promise<void>',
-        description: 'Add a credential verifier after the existing registrations.',
-        parameters: [{ name: 'provider', description: 'verifier owning its credential and Peer selection.' }],
+        signature: 'register(provider: AuthenticationProvider, options?: AuthenticationRegistrationOptions): () => Promise<void>',
+        description: 'Add a credential verifier after the existing registrations, or ahead of them with `precedence: \'first\'`.',
+        parameters: [{ name: 'provider', description: 'verifier owning its credential and Peer selection.' }, { name: 'options', description: 'placement among the existing registrations; omitted appends.' }],
         returns: 'disposer withdrawing this registration; the calling scope also withdraws it on unload.',
       },
       {
@@ -2017,10 +2017,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['when the provider does not support watching or cannot initialize the watcher.'],
       },
       {
-        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
-        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.',
-        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        signature: 'abstract resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal; unconfined?: boolean }): Promise<FsTarget>',
+        description: 'Resolve a model/plugin-supplied path into a stable FsTarget. May perform I/O (a remote/sandboxed backend may need a round-trip to map a path to a stable identity), hence async even though the local backend only normalizes + realpaths.\n\nA provider that confines the model to roots refuses, for every caller, a path written under a root whose real path leaves the roots, because the model can plant such links; a reader the person drives directly, such as the Files panel, passes `unconfined` to resolve as before.',
+        parameters: [{ name: 'path', description: 'the path to resolve; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override, cancellation signal, and the person-facing `unconfined` resolution.' }],
         returns: 'the stable target; the same file yields the same `targetKey`.',
+      },
+      {
+        signature: 'resolveModelPath(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget>',
+        description: 'Resolve a path the model supplied to a model-facing tool. A provider that confines the model to configured roots refuses, with `FS_OUTSIDE_ROOTS`, a path whose real path lies outside every root; an absent path is judged by its nearest existing ancestor. The base provider has no roots and resolves exactly like resolve. Every model-facing tool resolves model-supplied paths through this method, never through resolve.',
+        parameters: [{ name: 'path', description: 'the model-supplied path; relative paths resolve against `opts.cwd`.' }, { name: 'opts', description: 'optional cwd override and cancellation signal.' }],
+        returns: 'the stable target, under a root when the provider confines the model.',
       },
       {
         signature: 'abstract processPath(target: FsTarget): string',
@@ -2087,6 +2093,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List direct children of a directory in stable name order. Returns resolved child targets plus cheap metadata only; never reads file contents.',
         parameters: [{ name: 'target', description: 'the resolved directory target.' }, { name: 'signal', description: 'aborts the listing.' }],
         returns: 'one entry per direct child, in stable name order.',
+      },
+      {
+        signature: 'makeDirectory(target: FsTarget, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise<void>',
+        description: 'Create a directory and its missing ancestors, like `mkdir -p`; an existing directory succeeds unchanged. The base provider rejects with `FS_IO_ERROR`; backends that can create directories override it.',
+        parameters: [{ name: 'target', description: 'the resolved directory target to create.' }, { name: 'signal', description: 'aborts before creation takes effect.' }, { name: 'sandboxPolicy', description: 'the per-call mode and workspace root this creation runs under; a sandboxing backend fences creation by it, the bare backend ignores it. Omit to leave the backend its own default.' }],
+        returns: 'a promise resolving once the directory exists.',
       },
       {
         signature: 'abstract writeText( target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy, ): Promise<FsWriteOutcome>',
@@ -2730,6 +2742,46 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'mumbo-browser-consent',
+    summary: 'The person\'s hold on the browser, provided as the `mumbo-browser-consent` service.',
+    description: 'The person\'s hold on the browser, provided as the `mumbo-browser-consent` service. While the person has taken over, every Playwright MCP browser tool and every `computer` action is refused before dispatch, and once the take over finishes no Session\'s Playwright MCP server holds a connection to the browser. No model tool changes it; the box\'s owner-only Host call does.',
+    methods: [
+      {
+        signature: 'readonly hold: BrowserHold',
+        description: 'Who has the browser now; every kind but `free` refuses the browser and desktop calls, and a takeover stays across a Host restart until the person hands it back.',
+        parameters: [],
+      },
+      {
+        signature: 'takeOver(): Promise<void>',
+        description: 'Take the browser over. Refusal starts before this returns; the promise settles once the takeover is recorded for a restart, the browser and desktop calls in flight are stopped, and every Session\'s browser connection is closed.',
+        parameters: [],
+        returns: 'after the browser connections are closed.',
+        throws: ['Error naming each step that failed; the browser stays taken over, {@link hold} reports it `unfinished` until a later call or a hand back succeeds, and a later call retries the steps.'],
+      },
+      {
+        signature: 'handBack(): Promise<void>',
+        description: 'Hand the browser back and reconnect each live Session\'s browser by reading its tabs. A take over requested while this runs wins, and the browser stays taken over.',
+        parameters: [],
+        returns: 'after the reconnecting reads settle; a failed read leaves the next desktop screenshot asking.',
+        throws: ['Error when the takeover record could not be removed; the browser stays taken over, and {@link hold} keeps its kind.'],
+      },
+    ],
+  },
+  {
+    key: 'mumbo-report-turns',
+    summary: 'Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it.',
+    description: 'Whether an Agent acts in a report-started turn: `@mumbo/mcp` provides it while loaded and gates tools with it.',
+    methods: [
+      {
+        signature: 'reportStarted(agent: Agent): boolean',
+        description: 'Whether a project\'s report opened the current turn of the Agent\'s root Session. The turn\'s origin is the source of the first message logged in the turn\'s first step that names one: `report`; `user`, such as a browser prompt, or `mcp`, through the door, for a person; `schedule`; or `goal`. A report claimed in that step with a person\'s message still makes the turn report-started. Every later message of the turn, such as a runtime-context snapshot or a compaction checkpoint, a message whose source declares a context form, such as a schedule change notice, and a message of any other source, leave the origin unchanged, so a turn that no such message opened keeps the previous turn\'s. A delegated child follows its live root Session.',
+        parameters: [{ name: 'agent', description: 'the live Agent that acts.' }],
+        returns: 'whether the turn\'s origin is a report; `false` before any origin.',
+        throws: ['when the Agent is a delegated child whose root is no longer live.'],
+      },
+    ],
+  },
+  {
     key: 'officeKit',
     summary: 'A provider lifetime owns all converters, queued calls, and temporary files.',
     description: 'A provider lifetime owns all converters, queued calls, and temporary files.',
@@ -2881,6 +2933,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Manage profile files and apply their declared reload lifecycle.',
     methods: [
       {
+        signature: 'readonly modelTools: boolean',
+        description: 'Whether the model may hold the `plugin_manager` tool; see Config.modelTools.',
+        parameters: [],
+      },
+      {
         signature: '@Remote async readBundleDetail(name: string, language: string, options?: { npmFileSources?: NpmFileSource[] }): Promise<BundleDetail>',
         description: 'Read a bundle\'s long description: the Markdown file its locale `meta.detail` names in `language`, otherwise its README. An installed bundle is read from its directory without network access; an official bundle the installation offers before it is installed is read from the npm file CDNs at its offered version. Nothing is cached.',
         parameters: [{ name: 'name', description: 'the bundle\'s package name, as `listBundles()` lists it.' }, { name: 'language', description: 'the display language, such as `zh-CN`; documents fall back through its prefixes to English.' }, { name: 'options', description: '`npmFileSources` names npm file CDNs to ask first for an offered bundle, in order, such as the one a Client measured as fastest; configured CDNs it omits follow, and CDNs that are not configured are not asked.' }],
@@ -2939,13 +2996,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote setPluginEnabled(id: PluginEntryId, enabled: boolean): Promise<ChangeResult>',
-        description: 'Persist a plugin entry\'s desired enablement and apply it on live profiles.',
+        description: 'Persist a plugin entry\'s desired enablement and apply it on live profiles. Enabling a row on the profile\'s deny list fails with an `operation-error` whose diagnostic names the row.',
         parameters: [{ name: 'id', description: 'Loader entry identity returned by listPlugins.' }, { name: 'enabled', description: 'Whether the plugin should run.' }],
         returns: 'Saved and runtime outcomes, including higher-priority overrides.',
       },
       {
         signature: '@Remote setBundleEnabled(name: string, enabled: boolean): Promise<ChangeResult>',
-        description: 'Select or remove a bundle layer while retaining installed dependencies.',
+        description: 'Select or remove a bundle layer while retaining installed dependencies. Enabling a bundle on the profile\'s deny list fails with an `operation-error` whose diagnostic names the bundle.',
         parameters: [{ name: 'name', description: 'Bundle package name.' }, { name: 'enabled', description: 'Whether the bundle contributes its patch layer.' }],
         returns: 'Persisted and runtime outcomes.',
       },
@@ -3009,7 +3066,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       {
         signature: '@Remote async readEntryDetail( url: string, name: string, version: string, language: string, options?: { refresh?: boolean; npmFileSources?: NpmFileSource[] }, ): Promise<PluginDetail>',
         description: 'Read the long description of one listed version of a plugin market entry, from the version\'s source: the npm file CDNs for a public npm version, or its pinned Git commit. The Markdown file the package\'s locale `meta.detail` names in `language` comes first, then the package\'s README, then the README of the entry\'s `repository`, or for an npm version without one, of its `package.json` `repository`, at the default branch. An npm version from another registry has no readable package files, so only the entry\'s `repository` is read.',
-        parameters: [{ name: 'url', description: 'a configured index URL.' }, { name: 'name', description: 'the plugin\'s package name.' }, { name: 'version', description: 'one listed version.' }, { name: 'language', description: 'the display language, such as `zh-CN`; documents fall back through its prefixes to English.' }, { name: 'options', description: '`refresh` reads again instead of reusing a result cached for `cacheTtlMs`; `npmFileSources` names npm file CDNs to ask first for an npm version, in order; configured CDNs it omits follow, and CDNs that are not configured are not asked.' }],
+        parameters: [{ name: 'url', description: 'a configured index URL.' }, { name: 'name', description: 'the plugin\'s package name.' }, { name: 'version', description: 'one listed version.' }, { name: 'language', description: 'the display language, such as `pt-BR`; documents fall back through its prefixes to English.' }, { name: 'options', description: '`refresh` reads again instead of reusing a result cached for `cacheTtlMs`; `npmFileSources` names npm file CDNs to ask first for an npm version, in order; configured CDNs it omits follow, and CDNs that are not configured are not asked.' }],
         returns: 'the document with its origin and image document id, or `none`.',
         throws: ['{RemoteError} the failures of `search`, `plugin-market/unknown-plugin` for an unlisted plugin or version, `plugin-market/invalid-query`, or `plugin-market/detail-unavailable`.'],
       },
@@ -4516,9 +4573,16 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Abstract subprocess service. Subclass, implement spawn, and load the subclass as a plugin — it registers as `ctx.subprocess` (one implementation per context; loading a second throws, which is cordis\' standard duplicate-service behavior).\n\nImplementations must honor these semantics:\n\n- Executable paths belong to one execution world shared with the mounted filesystem provider.\n- spawn returns a live handle synchronously. Target identity remains provider-private; `done` resolves with the spawned command\'s exit facts and may reject for spawn or provider failures.\n- Collect-mode readers are offset-based and non-consuming, so independent readers never consume one another\'s output; lossy reads report truncation and the spill file holding the complete stream when one exists. Piped streams are handed to the caller raw and never buffered here.\n- SubprocessHandle.terminate (and the spec\'s abort signal) starts the provider\'s documented procedure against its managed range. SubprocessHandle.waitForExit observes that same range so a consumer-owned teardown ladder can hold each tier on real quiescence; each provider documents its signalling and observability limits.\n- Disposal of the service terminates all still-running managed processes and awaits their exit.\n- spawnTerminal owns terminal allocation, text transport, foreground groups, signalling, and whole-session quiescence behind one awaited termination method; readiness and persistent-shell policy stay in the PTY consumer. Its output stream ends after queued terminal output when the top-level process exits.',
     methods: [
       {
-        signature: 'abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, ): Promise<string>',
-        description: 'Resolve one configured executable in this provider\'s execution world. Absolute paths are verified; bare names use the provider\'s scrubbed PATH plus explicit environment overrides. Relative paths containing separators are rejected: the resolution base is undefined, so providers fail loud instead of guessing.',
-        parameters: [{ name: 'command', description: 'absolute executable path or bare PATH name.' }, { name: 'env', description: 'explicit environment entries used for lookup.' }, { name: 'signal', description: 'aborts remote or local lookup.' }],
+        signature: 'serverHome(identity: string): string',
+        description: 'The home of a named identity that runs a server, such as an MCP stdio server whose config names the identity: the directory each such server starts in. A provider checks the home, and the search paths the identity receives, by the rules of its serverIdentity. The base provider configures no identity.',
+        parameters: [{ name: 'identity', description: 'the identity, as a spawn request\'s `identity` names it.' }],
+        returns: 'the identity\'s home, by its real path.',
+        throws: ['when the provider configures no such identity, or its home or search paths fail the provider\'s checks.'],
+      },
+      {
+        signature: 'abstract resolveExecutable( command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal, identity?: string, ): Promise<string>',
+        description: 'Resolve one configured executable in this provider\'s execution world. Absolute paths are verified; bare names use the provider\'s scrubbed PATH plus explicit environment overrides. Relative paths containing separators are rejected: the resolution base is undefined, so providers fail loud instead of guessing. The result is for a spawn through this provider as the same identity: under a childIdentity the lookup searches that identity\'s PATH, which may name directories it can write.',
+        parameters: [{ name: 'command', description: 'absolute executable path or bare PATH name.' }, { name: 'env', description: 'explicit environment entries used for lookup.' }, { name: 'signal', description: 'aborts remote or local lookup.' }, { name: 'identity', description: 'the provider-configured identity whose environment supplies PATH, as on {@link SubprocessSpawnSpec.identity}; omitted, the default. An unknown name is refused.' }],
         returns: 'a canonical executable path.',
       },
       {
@@ -5250,10 +5314,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'ensure(agent: Agent, signal?: AbortSignal): Promise<string>',
-        description: 'Validate the current directory and restore the original project when it disappeared.',
-        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection.' }],
+        description: 'Validate the current directory and restore the original project when the current directory disappeared or the filesystem provider refuses it with `FS_OUTSIDE_ROOTS`, so no directory reader follows a link that leaves the deployment\'s roots. A missing original project is recreated empty through the filesystem provider and logged; files it held are not restored. Every Session in this process that was created before the recreation and works in, or falls back to, that project is told once.',
+        parameters: [{ name: 'agent', description: 'live or unpublished Agent owning the Session.' }, { name: 'signal', description: 'cancellation for filesystem inspection and creation.' }],
         returns: 'the existing directory; recovery is committed before fulfillment. A notice failure is warned without reverting the committed state.',
-        throws: ['{@link WorkingDirectoryError} `WORKING_DIRECTORY_UNAVAILABLE` when the original project is also unavailable or the service is disposed, or the rejection of a `working-directory/access` listener.'],
+        throws: ['{@link WorkingDirectoryError} `WORKING_DIRECTORY_UNAVAILABLE` when the original project is missing and cannot be recreated, which is logged, when the provider also refuses the original project with `FS_OUTSIDE_ROOTS`, or when the service is disposed; or the rejection of a `working-directory/access` listener.'],
       },
       {
         signature: 'set(agent: Agent, path: string, signal?: AbortSignal): Promise<string>',
@@ -5451,7 +5515,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>',
-        description: 'Archive one session durably. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive). An already archived id resolves without writing, asking, or stopping.',
+        description: 'Archive one session durably. The `workspace/archive-veto` listeners are asked first, with or without `stopActivity`; a refusal rejects with WorkspaceArchiveVetoedError before any other check, write, or stop. The session must exist (live or in session persistence); its workspace accounting — or lack of one — is irrelevant. Without `stopActivity` the session must also be inactive: the `workspace/session-activity` waterfall is asked once, and any reported activity rejects with WorkspaceActiveSessionError before anything is written. With `stopActivity` the archive is written without an activity check, and the `workspace/session-stop` providers are then asked to stop the session\'s work: the durable archive set is what a provider\'s `agent/pre-step` gate reads, so every wake the stops induce is already blocked. Archiving drops the session\'s pin in the same durable write (pinning and archival are mutually exclusive). An already archived id that no listener vetoes resolves without writing, asking the activity waterfall, or stopping.',
         parameters: [{ name: 'sessionId', description: 'The session to archive.' }, { name: 'options', description: 'Whether running work is stopped instead of refusing.' }],
         returns: 'resolution after durability, any stop requests, and follow-up admission.',
       },
@@ -6287,6 +6351,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'request', description: 'owner, requested path (null validates the current directory), and the access\'s cancellation.' }, { name: 'next', description: 'perform validation and commit.' }],
   },
   {
+    name: 'workspace/archive-veto',
+    mode: 'bail',
+    signature: '\'workspace/archive-veto\'(request: SessionActivityRequest): string | undefined',
+    summary: 'Ask whether a session may be archived at all.',
+    description: 'Ask whether a session may be archived at all. It is dispatched first on every archive request, with or without `stopActivity` and also for an id already archived; the first listener that returns a reason refuses the request with WorkspaceArchiveVetoedError before anything is written, asked, or stopped. Listeners decide synchronously from state they own; returning `undefined` leaves the decision to the others.',
+    parameters: [{ name: 'request', description: 'the session the archive request names.' }],
+  },
+  {
     name: 'workspace/session-activity',
     mode: 'waterfall',
     signature: '\'workspace/session-activity\'( request: SessionActivityRequest, next: () => Promise<readonly SessionActivity[]>, ): Promise<readonly SessionActivity[]>',
@@ -6651,6 +6723,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AuthenticationProvider {\n    authenticate(request: ConnectionTrustRequest): PeerScope | undefined;\n}',
   },
   {
+    name: 'AuthenticationRegistrationOptions',
+    declaration: 'export interface AuthenticationRegistrationOptions {\n    readonly precedence?: \'first\';\n}',
+  },
+  {
     name: 'AuthorizationEntry',
     declaration: 'export interface AuthorizationEntry {\n    key: CredentialKey;\n    label: string;\n    methods: readonly AuthorizationMethod[];\n    inFlight: boolean;\n}',
   },
@@ -6737,6 +6813,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'BrandedNumber',
     declaration: 'export type BrandedNumber<B extends string> = number & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BrowserHold',
+    declaration: 'export type BrowserHold = {\n    readonly kind: \'free\';\n} | {\n    readonly kind: \'taking\';\n} | {\n    readonly kind: \'held\';\n} | {\n    readonly kind: \'unfinished\';\n    readonly failure: string;\n};',
   },
   {
     name: 'BrowserUseProviderName',
@@ -6979,10 +7059,6 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ComputerUseProviderName = Branded<\'ComputerUseProviderName\'>;',
   },
   {
-    name: 'ConfigInput',
-    declaration: 'export type ConfigInput = StdioConfigInput | StreamableHttpConfigInput;',
-  },
-  {
     name: 'ConfigureCall',
     declaration: 'export type ConfigureCall = (controls: Readonly<LlmCallControls>, model: Readonly<LlmResolvedModelInfo>) => LlmCallControls;',
   },
@@ -6996,7 +7072,15 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ConnectionAuthentication',
-    declaration: 'export class ConnectionAuthentication extends Service {\n    constructor(ctx: Context);\n    register(provider: AuthenticationProvider): () => Promise<void>;\n    authenticate(request: ConnectionTrustRequest): PeerAdmission;\n}',
+    declaration: 'export class ConnectionAuthentication extends Service {\n    constructor(ctx: Context);\n    register(provider: AuthenticationProvider, options?: AuthenticationRegistrationOptions): () => Promise<void>;\n    authenticate(request: ConnectionTrustRequest): PeerAdmission;\n}',
+  },
+  {
+    name: 'ConnectionFetchAccessRequest',
+    declaration: 'export interface ConnectionFetchAccessRequest {\n    readonly principal: Principal;\n    readonly action: `${string}/${string}`;\n    readonly resources: readonly RemoteAccessResource[];\n}',
+  },
+  {
+    name: 'ConnectionFetchAuthorizer',
+    declaration: 'export type ConnectionFetchAuthorizer = (request: ConnectionFetchAccessRequest) => boolean;',
   },
   {
     name: 'ConnectionFetchHandler',
@@ -7008,7 +7092,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ConnectionFetchRoute',
-    declaration: 'export interface ConnectionFetchRoute {\n    readonly path: string;\n    readonly methods: readonly ConnectionFetchMethod[];\n    readonly requestBody: ConnectionRequestBodyMode;\n    readonly fetch: (request: Request) => Promise<Response>;\n}',
+    declaration: 'export interface ConnectionFetchRoute {\n    readonly path: string;\n    readonly methods: readonly ConnectionFetchMethod[];\n    readonly requestBody: ConnectionRequestBodyMode;\n    readonly access?: ConnectionFetchRouteAccess;\n    readonly fetch: (request: Request) => Promise<Response>;\n}',
+  },
+  {
+    name: 'ConnectionFetchRouteAccess',
+    declaration: 'export interface ConnectionFetchRouteAccess {\n    readonly action: `${string}/${string}`;\n    readonly resources: {\n        readonly [Kind in TypertResourceKind]?: string;\n    };\n}',
   },
   {
     name: 'ConnectionRequestBodyMode',
@@ -8064,7 +8152,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'HostConnectionFetch',
-    declaration: 'export interface HostConnectionFetch {\n    register(route: ConnectionFetchRoute): () => Promise<void>;\n}',
+    declaration: 'export interface HostConnectionFetch {\n    register(route: ConnectionFetchRoute): () => Promise<void>;\n    authorize(authorizer: ConnectionFetchAuthorizer): () => Promise<void>;\n}',
   },
   {
     name: 'HostConnectionRpc',
@@ -10892,7 +10980,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SubprocessSpawnSpec',
-    declaration: 'export interface SubprocessSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    stdio: SubprocessStdio;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n    env?: NodeJS.ProcessEnv | undefined;\n}',
+    declaration: 'export interface SubprocessSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    stdio: SubprocessStdio;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n    env?: NodeJS.ProcessEnv | undefined;\n    identity?: string | undefined;\n}',
   },
   {
     name: 'SubprocessStdinMode',
@@ -11628,7 +11716,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebFallback',
-    declaration: 'export type WebFallback = Pick<WebRoute, \'handler\' | \'auth\'> | Pick<WebResourceRoute, \'resource\' | \'auth\'>;',
+    declaration: 'export type WebFallback = Pick<WebRoute, \'handler\' | \'auth\' | \'access\'> | Pick<WebResourceRoute, \'resource\' | \'auth\' | \'access\'>;',
   },
   {
     name: 'WebFetchBody',
@@ -11696,7 +11784,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebResourceRoute',
-    declaration: 'export interface WebResourceRoute {\n    kind: WebRouteKind;\n    path: string;\n    resource: WebResource;\n    auth?: WebAuthenticationRule;\n}',
+    declaration: 'export interface WebResourceRoute {\n    kind: WebRouteKind;\n    path: string;\n    resource: WebResource;\n    auth?: WebAuthenticationRule;\n    access?: WebRouteAccess;\n}',
   },
   {
     name: 'WebResultView',
@@ -11704,7 +11792,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebRoute',
-    declaration: 'export interface WebRoute {\n    kind: WebRouteKind;\n    path: string;\n    handler: (req: IncomingMessage, res: ServerResponse, peer?: PeerScope) => void | Promise<void>;\n    auth?: WebAuthenticationRule;\n}',
+    declaration: 'export interface WebRoute {\n    kind: WebRouteKind;\n    path: string;\n    handler: (req: IncomingMessage, res: ServerResponse, peer?: PeerScope) => void | Promise<void>;\n    auth?: WebAuthenticationRule;\n    access?: WebRouteAccess;\n}',
+  },
+  {
+    name: 'WebRouteAccess',
+    declaration: 'export type WebRouteAccess = \'non-owner\';',
   },
   {
     name: 'WebRouteKind',
@@ -11744,7 +11836,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WebUpgradeRoute',
-    declaration: 'export interface WebUpgradeRoute {\n    path: string;\n    handler: (req: IncomingMessage, socket: Duplex, head: Buffer, peer?: PeerScope) => void | Promise<void>;\n    auth?: WebAuthenticationRule;\n}',
+    declaration: 'export interface WebUpgradeRoute {\n    path: string;\n    handler: (req: IncomingMessage, socket: Duplex, head: Buffer, peer?: PeerScope) => void | Promise<void>;\n    auth?: WebAuthenticationRule;\n    access?: WebRouteAccess;\n}',
   },
   {
     name: 'WeeklyInput',

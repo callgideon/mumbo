@@ -7,7 +7,7 @@ import { FiberState } from '@deepseek-ai/cordis'
 import { chromium } from 'playwright'
 import { expect, it, onTestFailed, onTestFinished } from 'vitest'
 import { launchWebScaffold, watchConsole } from './scaffold.ts'
-import { ZH_BROWSER_LOCALE, saveFailureShot } from './support.ts'
+import { saveFailureShot } from './support.ts'
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/plugins/fixture-synced-config', import.meta.url))
 const SCHEMASTERY = fileURLToPath(new URL('../../../vendor/schemastery', import.meta.url))
@@ -55,7 +55,7 @@ it('renders volatile Config without secrets or ordinary fields and updates it in
   expect(html).not.toContain('secret-token-r0')
   expect(html).not.toContain('host-only-cache-r0')
 
-  const page = await browser.newPage({ locale: ZH_BROWSER_LOCALE })
+  const page = await browser.newPage({ locale: 'en-US' })
   const console = watchConsole(page)
   onTestFailed(() => saveFailureShot(page, 'web-e2e-client-config-sync'))
   let navigations = 0

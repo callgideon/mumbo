@@ -867,10 +867,10 @@ describe('Task manager catalog', () => {
   })
 
   it('shows the recommendations under the empty All view in the active language', () => {
-    mount({ records: [] }, zh)
-    const section = recommendations(zh)!
-    expect(within(section).getByRole('button', { name: zh['recommend.weather.title'] })).toBeDefined()
-    expect(section.textContent).toContain(zh['recommend.weather.schedule'])
+    mount({ records: [] }, fr)
+    const section = recommendations(fr)!
+    expect(within(section).getByRole('button', { name: fr['recommend.weather.title'] })).toBeDefined()
+    expect(section.textContent).toContain(fr['recommend.weather.schedule'])
   })
 
   it.each([

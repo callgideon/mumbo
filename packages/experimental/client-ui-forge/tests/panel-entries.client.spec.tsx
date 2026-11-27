@@ -20,7 +20,7 @@ import {
 import {
   CheckoutRow, ConnectionRow, LocalChangesRow, type CheckoutRowProps, type ConnectionRowProps, type LocalChangesRowProps,
 } from '../src/client/EnvironmentRows.tsx'
-import { de, en, es, fr, ja, pt, ru, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, pt, ru } from '../src/client/locales.ts'
 import type { PanelSnapshot } from '../src/client/source.ts'
 import type { ForgePanelState } from '../src/types.ts'
 import { createChangeRequestsSectionStore } from '../src/client/change-requests-store.ts'
@@ -588,7 +588,7 @@ describe('LocalChangesRow', () => {
     expect(row(state).view.container.innerHTML).toBe('')
   })
 
-  it.each(Object.entries({ zh, en, ja, es, fr, de, ru, pt }))('names the row button with its visible text first in %s', (_locale, copy) => {
+  it.each(Object.entries({ en, ja, es, fr, de, ru, pt }))('names the row button with its visible text first in %s', (_locale, copy) => {
     const fill = (text: string): string => text.replace('{count}', '2').replace('{added}', '5').replace('{deleted}', '1')
     expect(fill(copy['changes.local.viewAria']).startsWith(fill(copy['changes.local.summary']))).toBe(true)
   })

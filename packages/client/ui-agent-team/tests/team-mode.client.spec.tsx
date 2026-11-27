@@ -48,7 +48,7 @@ it.each(Object.entries({ en, ja, es, fr, de, ru, pt }).flatMap(([locale, diction
 it('keeps summary state projection-owned and blocks navigation while locked', () => {
   const input = props(false)
   const view = render(<TeamModeToggle {...input} />)
-  expect(screen.getByText('Close')).toBeTruthy()
+  expect(screen.getByText('Off')).toBeTruthy()
   const lockedInput = props(true)
   view.rerender(<TeamModeToggle {...lockedInput} locked />)
   expect(screen.getByText('On')).toBeTruthy()

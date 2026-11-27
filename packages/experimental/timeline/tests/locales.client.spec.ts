@@ -12,7 +12,7 @@ describe('Timeline labels', () => {
       const before = locale.getSnapshot().locales.map(item => item.id)
       const off = locale.register('timeline', dictionaries)
       expect(locale.getSnapshot().locales.map(item => item.id)).toEqual(before)
-      expect(before).toEqual(['zh', 'en'])
+      expect(before).toEqual(['en'])
       expect(locale.bind('timeline')('title')).toBe(en.title)
       off()
       expect(locale.bind('timeline')('title')).toBe('title')
@@ -20,7 +20,7 @@ describe('Timeline labels', () => {
       await ctx.fiber.dispose()
     }
   })
-  it('resolves all eight app languages, preserves placeholders, and follows external fallback chains', async () => {
+  it('resolves all seven app languages, preserves placeholders, and follows external fallback chains', async () => {
     const ctx = new Context()
     const locale = new LocaleRuntime(ctx, undefined, { languages: ['en'], preference: null })
     try {

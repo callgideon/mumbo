@@ -33,6 +33,6 @@ it('renders the entry below the pruner threshold', () => {
 })
 
 it('indexes the guide of the pinned selection exactly once', () => {
-  const indexed = [...body().matchAll(/^- `([a-z-]+)`：/gmu)].map(match => match[1] ?? '')
+  const indexed = [...body().matchAll(/^- `([a-z-]+)`:/gmu)].map(match => match[1] ?? '')
   expect(indexed.toSorted()).toEqual(PINNED_GUIDES)
 })

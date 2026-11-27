@@ -1,8 +1,8 @@
 /** The copy every connector's account section shares; each connector's own text comes with its registration. */
 import type { LocalizedText } from '@deepseek-ai/dsh-package-manifest'
 
-/** English dictionary and key source. */
-const en = {
+/** English dictionary and key source. Every dictionary is exported so the locale parity gate compares them. */
+export const en = {
   'status.checking': 'Checking connection',
   'status.disconnected': 'Not connected',
   'status.waiting-browser': 'Waiting for you to confirm in the browser',
@@ -61,7 +61,7 @@ export const ja: Record<McpAccountKey, string> = {
 }
 
 /** Spanish dictionary. */
-const es: Record<McpAccountKey, string> = {
+export const es: Record<McpAccountKey, string> = {
   'status.checking': 'Comprobando la conexión',
   'status.disconnected': 'No conectado',
   'status.waiting-browser': 'Esperando su confirmación en el navegador',
@@ -89,7 +89,7 @@ const es: Record<McpAccountKey, string> = {
 }
 
 /** French dictionary. */
-const fr: Record<McpAccountKey, string> = {
+export const fr: Record<McpAccountKey, string> = {
   'status.checking': 'Vérification de la connexion',
   'status.disconnected': 'Non connecté',
   'status.waiting-browser': 'En attente de votre confirmation dans le navigateur',
@@ -117,7 +117,7 @@ const fr: Record<McpAccountKey, string> = {
 }
 
 /** German dictionary. */
-const de: Record<McpAccountKey, string> = {
+export const de: Record<McpAccountKey, string> = {
   'status.checking': 'Verbindung wird geprüft',
   'status.disconnected': 'Nicht verbunden',
   'status.waiting-browser': 'Warten auf Ihre Bestätigung im Browser',
@@ -145,7 +145,7 @@ const de: Record<McpAccountKey, string> = {
 }
 
 /** Russian dictionary. */
-const ru: Record<McpAccountKey, string> = {
+export const ru: Record<McpAccountKey, string> = {
   'status.checking': 'Проверка подключения',
   'status.disconnected': 'Не подключено',
   'status.waiting-browser': 'Ожидание вашего подтверждения в браузере',
@@ -173,7 +173,7 @@ const ru: Record<McpAccountKey, string> = {
 }
 
 /** Portuguese dictionary. */
-const pt: Record<McpAccountKey, string> = {
+export const pt: Record<McpAccountKey, string> = {
   'status.checking': 'Verificando a conexão',
   'status.disconnected': 'Não conectado',
   'status.waiting-browser': 'Aguardando sua confirmação no navegador',
