@@ -2772,6 +2772,12 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>The box-edge fixtures still mirror production: the edge's <code>web</code> row already set <code>searchProvider</code>, so search on a box goes where it went before.</li>
 <li>Accepted as built: the deny list and the telemetry hunks share a commit with the rows; the language-server pin doesn't run in mumbo-ci, since no row mounts those packages; two gate exceptions; the rebrand rule for the moved desktop publish config.</li>
 <li><strong>Not yet shown:</strong> nothing ran as root or booted as a box, no member turn used a real model, no browser check, and snapshots weren't replayed. <code>sdk/mumbo-state</code> and <code>web/mumbo-report-shell</code> still record the removed <code>working_directory</code> tool, so they fail replay until re-recorded with the key.</li>
+<li><strong>Throwaway smoke</strong> [2026-11-27, image <code>smoke-860e12c94f</code>, one person box started by the live edge's script as real root, then killed]: &quot;app clean 2&quot;, version 0.2.3-alpha.2, Node v24.22.3; no unresolved, pending or dropped line in the log; exactly one <code>token=</code> line; the door answers 200 with its key and 401 with a wrong one; <code>/pairing/</code> is 404; no <code>sessions.sqlite</code>. Production wasn't touched.
+<ul>
+<li>Still to run on a throwaway before the founder's box moves: a copy of the founder's backup opens under the new image with the same Session count, and the owner is refused the forge bundle and <code>remote-connection</code> over the API.</li>
+<li>Waiting for the merged image on real boxes: the member checks, a real model turn, and the stdio MCP server's user.</li>
+</ul>
+</li>
 </ul>
 </li>
 <li><strong>Rollout check (mumbo), in addition to B51's and B54's:</strong>

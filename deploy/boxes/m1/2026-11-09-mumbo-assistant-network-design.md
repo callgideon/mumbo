@@ -1611,6 +1611,9 @@ The cache's worst case is a subscription that dies silently: copies are served f
     - The box-edge fixtures still mirror production: the edge's `web` row already set `searchProvider`, so search on a box goes where it went before.
     - Accepted as built: the deny list and the telemetry hunks share a commit with the rows; the language-server pin doesn't run in mumbo-ci, since no row mounts those packages; two gate exceptions; the rebrand rule for the moved desktop publish config.
     - **Not yet shown:** nothing ran as root or booted as a box, no member turn used a real model, no browser check, and snapshots weren't replayed. `sdk/mumbo-state` and `web/mumbo-report-shell` still record the removed `working_directory` tool, so they fail replay until re-recorded with the key.
+    - **Throwaway smoke** [2026-11-27, image `smoke-860e12c94f`, one person box started by the live edge's script as real root, then killed]: "app clean 2", version 0.2.3-alpha.2, Node v24.22.3; no unresolved, pending or dropped line in the log; exactly one `token=` line; the door answers 200 with its key and 401 with a wrong one; `/pairing/` is 404; no `sessions.sqlite`. Production wasn't touched.
+      - Still to run on a throwaway before the founder's box moves: a copy of the founder's backup opens under the new image with the same Session count, and the owner is refused the forge bundle and `remote-connection` over the API.
+      - Waiting for the merged image on real boxes: the member checks, a real model turn, and the stdio MCP server's user.
   - **Rollout check (mumbo), in addition to B51's and B54's:**
     1. Each template's build smoke prints "app clean 2" and `node --version` at 24.22.3 or newer.
     2. Per box, before the upgrade: the backup restores, and the Session count is noted.
