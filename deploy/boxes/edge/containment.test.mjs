@@ -277,6 +277,18 @@ test('containment rows: the harness fixtures with the box\'s ids and agent in th
   assert.throws(() => containmentLayout({ ...c, mcpServerWorkspace: 'all' }, true), /mcpServerWorkspace "all"/)
 })
 
+// An overlay patch replaces a row's whole `config`: a patch of the image's `plugin-deny-list` row (B55) would erase the
+// bundles and rows a box can never enable, and one of `preset-standard` or `preset-ptc` the presets' plugin lists.
+test('no edge overlay names the deny-list row or patches a preset\'s config; the plugin-manager row stays as it is', () => {
+  for (const person of [true, false]) {
+    for (const s of [script(c, person), containmentRows(c, person)]) {
+      assert.ok(!/\bplugin-deny-list\b/.test(s), person ? 'person' : 'project')
+      assert.ok(!/- id: preset-(standard|ptc)\n\s+config:/.test(s), person ? 'person' : 'project')
+    }
+    assert.match(containmentRows(c, person), /- id: plugin-manager\n\s+config:\n\s+modelTools: false\n/)
+  }
+})
+
 test('a contained project box exports dsh-superagent\'s directories for the image\'s overlay, and stops on an overlay that does not read them', () => {
   const vars = ['MUMBO_WORK_DIR', 'MUMBO_WORKER_DIR', 'MUMBO_GH_CONFIG_DIR']
   let r = root()
