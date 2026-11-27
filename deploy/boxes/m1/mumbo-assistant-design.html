@@ -2779,6 +2779,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li>Waiting for the merged image on real boxes: the member checks, a real model turn, and the stdio MCP server's user.</li>
 </ul>
 </li>
+<li><strong>Approved at 487d2d5875</strong> [2026-11-27], pending CI on that head, which differs from the green 860e12c94f only by snapshot files and one comment line.
+<ul>
+<li>mumbo-ci was green on 860e12c94f, <code>build:check</code> passes, and the snapshot suite reads 304 passed and 17 failed, every failure being the test host's missing sandbox backend.</li>
+<li>The seven fork cases were refreshed by replay, without the key. Recorded model responses are unchanged in content; message id placeholders and one case's stream timestamps moved.</li>
+<li><strong>A resumed Session keeps its saved permission mode.</strong> The refreshed resume recording gains read-only events because upstream's snapshot driver now asks for that mode. The SDK's new option is opt-in, the SDK server is on no box, and no restart, reconcile or reopen path sets a mode. Read from the code, and mumbo's K2 check notes the mode before and after a restart.</li>
+<li>CodeQL lists 14 alerts, all in upstream files. None is fixed here. The founder dismisses or keeps them.</li>
+<li>The founder's box moves only after a copy of its backup has opened under the new image on a throwaway, or the founder has declined that check.</li>
+</ul>
+</li>
 </ul>
 </li>
 <li><strong>Rollout check (mumbo), in addition to B51's and B54's:</strong>
