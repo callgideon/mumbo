@@ -3501,6 +3501,16 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Per-site approval tiers, and a phishing check before any sign-in form.</strong></li>
 </ul>
 </li>
+<li>
+<p><strong>From the 0.2.3-alpha.2 sync (B55)</strong> [2026-11-27]:</p>
+<ul>
+<li><strong>Upload file names are trimmed with a quadratic regex.</strong> <code>attachment-local</code>'s <code>fileLeafName</code> runs <code>/[. ]+$/</code> on a name the caller declares, in root dsh, and a member can upload to a Session they reach. Find the largest name the upload paths accept, replace the trims with a linear one, and test it as the diff-fence fix was. It predates the sync.</li>
+<li><strong>A member is still offered &quot;mark unread&quot;,</strong> which needs an action no member role holds. Hide it by the grant.</li>
+<li><strong>The Plugins page still shows a switch for bundles and rows the deny list refuses.</strong> Hide them where the list names them.</li>
+<li><strong><code>workingDirectory.set</code> resolves through <code>fs.resolve</code>.</strong> It must resolve through <code>resolveModelPath</code> before any plugin that calls it with a model-influenced value is allowed on a box.</li>
+<li><strong>Two fork snapshots (<code>sdk/mumbo-state</code>, <code>web/mumbo-report-shell</code>) record the removed <code>working_directory</code> tool</strong> and need re-recording with the key.</li>
+</ul>
+</li>
 </ul>
 <h3>Deferred to their own research or design</h3>
 <ul>

@@ -2009,6 +2009,12 @@ The person's-computer tracks run alongside these milestones: N1 (sections 17b an
     - Playwright MCP states it is "not a security boundary", so the CDP socket is what holds the person's web identity.
   - **A logged-out browser for research tasks,** a throwaway context with no sign-ins, as Atlas does. The signed-in Chrome is kept for account tasks, which shrinks what injected instructions on an arbitrary page can reach.
   - **Per-site approval tiers, and a phishing check before any sign-in form.**
+- **From the 0.2.3-alpha.2 sync (B55)** [2026-11-27]:
+  - **Upload file names are trimmed with a quadratic regex.** `attachment-local`'s `fileLeafName` runs `/[. ]+$/` on a name the caller declares, in root dsh, and a member can upload to a Session they reach. Find the largest name the upload paths accept, replace the trims with a linear one, and test it as the diff-fence fix was. It predates the sync.
+  - **A member is still offered "mark unread",** which needs an action no member role holds. Hide it by the grant.
+  - **The Plugins page still shows a switch for bundles and rows the deny list refuses.** Hide them where the list names them.
+  - **`workingDirectory.set` resolves through `fs.resolve`.** It must resolve through `resolveModelPath` before any plugin that calls it with a model-influenced value is allowed on a box.
+  - **Two fork snapshots (`sdk/mumbo-state`, `web/mumbo-report-shell`) record the removed `working_directory` tool** and need re-recording with the key.
 
 ### Deferred to their own research or design
 
