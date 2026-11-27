@@ -3508,7 +3508,9 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>A member is still offered &quot;mark unread&quot;,</strong> which needs an action no member role holds. Hide it by the grant.</li>
 <li><strong>The Plugins page still shows a switch for bundles and rows the deny list refuses.</strong> Hide them where the list names them.</li>
 <li><strong><code>workingDirectory.set</code> resolves through <code>fs.resolve</code>.</strong> It must resolve through <code>resolveModelPath</code> before any plugin that calls it with a model-influenced value is allowed on a box.</li>
-<li><strong>Two fork snapshots (<code>sdk/mumbo-state</code>, <code>web/mumbo-report-shell</code>) record the removed <code>working_directory</code> tool</strong> and need re-recording with the key.</li>
+<li>~~Two fork snapshots (<code>sdk/mumbo-state</code>, <code>web/mumbo-report-shell</code>) record the removed <code>working_directory</code> tool and need re-recording with the key.~~ Withdrawn: the tool appears only as a name in recorded tool lists, and a keyless refresh in #66 updates the seven stale fork cases without changing any recorded model response.</li>
+<li><strong><code>apps/web/tests/mumbo-assistant.e2e.ts</code> is stale against B29.</strong> Its first test waits for a Mumbo row in the Sessions tree, and B29 moved Mumbo to the navigation band. It fails on main too.</li>
+<li><strong>Three translated web recordings haven't been replayed</strong> where a sandbox backend exists: <code>web/changed-files-turn</code>, <code>web/present</code>, <code>web/goal-multi-turn-actions</code>.</li>
 </ul>
 </li>
 </ul>

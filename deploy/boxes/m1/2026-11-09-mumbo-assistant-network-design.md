@@ -2014,7 +2014,9 @@ The person's-computer tracks run alongside these milestones: N1 (sections 17b an
   - **A member is still offered "mark unread",** which needs an action no member role holds. Hide it by the grant.
   - **The Plugins page still shows a switch for bundles and rows the deny list refuses.** Hide them where the list names them.
   - **`workingDirectory.set` resolves through `fs.resolve`.** It must resolve through `resolveModelPath` before any plugin that calls it with a model-influenced value is allowed on a box.
-  - **Two fork snapshots (`sdk/mumbo-state`, `web/mumbo-report-shell`) record the removed `working_directory` tool** and need re-recording with the key.
+  - ~~Two fork snapshots (`sdk/mumbo-state`, `web/mumbo-report-shell`) record the removed `working_directory` tool and need re-recording with the key.~~ Withdrawn: the tool appears only as a name in recorded tool lists, and a keyless refresh in #66 updates the seven stale fork cases without changing any recorded model response.
+  - **`apps/web/tests/mumbo-assistant.e2e.ts` is stale against B29.** Its first test waits for a Mumbo row in the Sessions tree, and B29 moved Mumbo to the navigation band. It fails on main too.
+  - **Three translated web recordings haven't been replayed** where a sandbox backend exists: `web/changed-files-turn`, `web/present`, `web/goal-multi-turn-actions`.
 
 ### Deferred to their own research or design
 
