@@ -2765,6 +2765,15 @@ The structural fix is B25b (section 17b): while a report started the turn, every
 <li><strong>Node.js:</strong> upstream requires <code>^24.22.3 || &gt;=26.13.1</code> for undici's security fixes. <code>deploy/Dockerfile</code> pins <code>node:24.22.3-bookworm</code> instead of the floating <code>node:24-bookworm</code>, mumbo-ci matches, and each template's build smoke prints a version at or above it.</li>
 <li><strong>Process text:</strong> upstream's AGENTS.md now prefers rebases. The fork keeps merge commits, no force-push and English only, which are the founder's rules.</li>
 <li><strong>Node AMI, apart from the sync</strong> [2026-11-23]: the nodes' launch template read Ubuntu's &quot;current&quot; AMI from SSM, so each plan showed drift, and the next replacement node would have booted an untested build. The cell module now takes <code>node_ami</code> (us-east-1 <code>ami-08b275ac6cc5dbefb</code>, ap-south-1 <code>ami-09d8c1e69d114dbf7</code>), the SSM lookup is gone, and a plan shows no changes (boxes/production 5ea463d253). A newer AMI goes through the RUNBOOK's node blue/green, one node first. <span class="tag m">my call</span></li>
+<li><strong>Build review, PR #66</strong> [2026-11-27, head 860e12c94f, draft]: it conforms to the rulings above on everything read. Approval waits on CI for this head, a local snapshot replay, and corrections to the PR body.
+<ul>
+<li>Read, not run: the precedence option and its one caller, the non-owner check and its five opt-ins, both owner guards, the door's route, the root switches in the bundle files and presets, the deny-list row, <code>ensure</code>, the seven <code>resolveModelPath</code> sites, the MCP schema, Office's root refusal, and the gate's entries. deploy/ changes only the Node pin and the desktop telemetry row.</li>
+<li>Listeners that answer before admission (the launch-token exchange, the MCP and account callbacks, pairing) are each token-gated, off on boxes, or live only during an attempt.</li>
+<li>The box-edge fixtures still mirror production: the edge's <code>web</code> row already set <code>searchProvider</code>, so search on a box goes where it went before.</li>
+<li>Accepted as built: the deny list and the telemetry hunks share a commit with the rows; the language-server pin doesn't run in mumbo-ci, since no row mounts those packages; two gate exceptions; the rebrand rule for the moved desktop publish config.</li>
+<li><strong>Not yet shown:</strong> nothing ran as root or booted as a box, no member turn used a real model, no browser check, and snapshots weren't replayed. <code>sdk/mumbo-state</code> and <code>web/mumbo-report-shell</code> still record the removed <code>working_directory</code> tool, so they fail replay until re-recorded with the key.</li>
+</ul>
+</li>
 <li><strong>Rollout check (mumbo), in addition to B51's and B54's:</strong>
 <ol>
 <li>Each template's build smoke prints &quot;app clean 2&quot; and <code>node --version</code> at 24.22.3 or newer.</li>
